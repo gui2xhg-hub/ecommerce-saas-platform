@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useRouter } from 'next/router';
 import { supabase } from '../../lib/supabase';
 
-export default function ProducaoTenant() {
+export default function FilaProducao() {
   const router = useRouter();
   const { slug } = router.query;
 
@@ -11,142 +11,241 @@ export default function ProducaoTenant() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    if (slug) {
-      fetchTenantAndOrders();
-      const interval = setInterval(() => {
-        if (tenant?.id) fetchOrders(tenant.id);
-      }, 10000);
+    if (router.isReady && slug) {
+      fetchData();
+      const interval = setInterval(fetchData, 15000); // Auto-refresh a cada 15s
       return () => clearInterval(interval);
     }
-  }, [slug, tenant?.id]);
+  }, [router.isReady, slug]);
 
-  const fetchTenantAndOrders = async () => {
-    const { data: tData } = await supabase.from('tenants').select('*').eq('slug', slug).single();
+  const fetchData = async () => {
+    const cleanSlug = String(slug).toLowerCase().trim();
+    const { data: tData } = await supabase.from('tenants').select('*').eq('slug', cleanSlug).single();
+
     if (tData) {
       setTenant(tData);
-      fetchOrders(tData.id);
+      const { data: oData } = await supabase.from('orders').select('*').eq('tenant_id', tData.id).order('id', { ascending: false });
+      if (oData) setOrders(oData);
     }
     setLoading(false);
   };
 
-  const fetchOrders = async (tenantId) => {
-    const { data: oData } = await supabase
-      .from('orders')
-      .select('*')
-      .eq('tenant_id', tenantId)
-      .order('created_at', { ascending: false });
-
-    if (oData) setOrders(oData);
-  };
-
   const updateOrderStatus = async (orderId, newStatus) => {
     await supabase.from('orders').update({ status: newStatus }).eq('id', orderId);
-    if (tenant) fetchOrders(tenant.id);
+    fetchData();
   };
 
-  const sendWhatsAppStatus = (order, msgType) => {
-    const cleanPhone = order.customer_phone.replace(/\D/g, '');
-    let msg = '';
-
-    if (msgType === 'producao') {
-      msg = `Olá ${order.customer_name}! 👕 Seu pedido #${order.id} no *${tenant.name}* entrou na fila de estamparia/confecção!`;
-    } else if (msgType === 'enviado') {
-      msg = `Olá ${order.customer_name}! 📦 Seu pedido #${order.id} no *${tenant.name}* foi produzido e enviado nos Correios/Transportadora!`;
-    }
-
-    window.open(`https://wa.me/55${cleanPhone}?text=${encodeURIComponent(msg)}`, '_blank');
+  const togglePaymentStatus = async (order) => {
+    const newPayment = order.payment_method?.includes('PAGO') ? 'PIX / Pendente' : 'PIX / PAGO 🟢';
+    await supabase.from('orders').update({ payment_method: newPayment }).eq('id', order.id);
+    fetchData();
   };
 
-  if (loading) return <div className="p-4 text-white text-center font-sans">Carregando Fila de Produção...</div>;
-  if (!tenant) return <div className="p-4 text-white text-center font-sans">Loja não encontrada.</div>;
+  // FUNÇÃO DE IMPRESSÃO DA ETIQUETA/PEDIDO
+  const handlePrintOrder = (order) => {
+    const printWindow = window.open('', '_blank', 'width=600,height=700');
+    const itemsList = Array.isArray(order.items) ? order.items : [];
 
-  const activeOrders = orders.filter(o => !o.archived);
-  const recebidosOrders = activeOrders.filter(o => !o.status || o.status === 'recebido');
-  const producaoOrders = activeOrders.filter(o => o.status === 'em_producao');
-  const enviadosOrders = activeOrders.filter(o => o.status === 'saiu_entrega' || o.status === 'enviado');
-
-  const renderOrderCard = (order) => (
-    <div key={order.id} className="bg-gray-900 border border-gray-800 p-4 rounded-2xl space-y-3 shadow-lg">
-      <div className="flex justify-between items-start border-b border-gray-800 pb-2">
-        <div>
-          <span className="font-bold text-xs text-orange-400">PEDIDO #{order.id}</span>
-          <h3 className="font-bold text-xs text-white">{order.customer_name}</h3>
-          <p className="text-[11px] text-gray-400">📱 {order.customer_phone}</p>
+    const htmlContent = `
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <title>Pedido #${order.id} - ${tenant?.name || 'Loja'}</title>
+        <style>
+          body { font-family: monospace; padding: 20px; width: 300px; margin: 0 auto; color: #000; }
+          .header { text-align: center; border-bottom: 2px dashed #000; padding-bottom: 10px; margin-bottom: 10px; }
+          .title { font-size: 16px; font-weight: bold; }
+          .subtitle { font-size: 12px; }
+          .section { border-bottom: 1px dashed #000; padding: 8px 0; font-size: 12px; }
+          .item { margin-bottom: 5px; }
+          .total { font-size: 14px; font-weight: bold; text-align: right; margin-top: 10px; }
+          .footer { text-align: center; margin-top: 20px; font-size: 10px; }
+        </style>
+      </head>
+      <body>
+        <div class="header">
+          <div class="title">${tenant?.name || 'LOJA DE ROUPAS'}</div>
+          <div class="subtitle">ETIQUETA DE ENVIO / PRODUÇÃO</div>
+          <div class="title" style="margin-top:5px;">PEDIDO #${order.id}</div>
         </div>
-      </div>
 
-      <div className="text-[11px] text-gray-300 bg-gray-950 p-2.5 rounded-xl border border-gray-800/80 space-y-1">
-        <p><b>Endereço:</b> {order.address}</p>
-        <p><b>Envio/Bairro:</b> {order.neighborhood}</p>
-      </div>
+        <div class="section">
+          <b>CLIENTE:</b> ${order.customer_name}<br/>
+          <b>TEL:</b> ${order.customer_phone}<br/>
+          <b>ENDEREÇO:</b> ${order.address}<br/>
+          <b>FRETE/ENVIO:</b> ${order.neighborhood || 'Envio Padrão'}<br/>
+          <b>PAGAMENTO:</b> ${order.payment_method || 'PIX'}
+        </div>
 
-      {/* DETALHES DE CADA CAMISA / TAMANHO / ESTAMPA */}
-      <div className="space-y-1.5 border-t border-b border-gray-800 py-2">
-        {order.items && Array.isArray(order.items) && order.items.map((it, idx) => (
-          <div key={idx} className="text-[11px] bg-gray-800/40 p-2 rounded-xl">
-            <p className="font-bold text-white">{it.quantity}x {it.name}</p>
-            <p className="text-[10px] text-gray-300">Tamanho: <b>{it.size}</b> | Cor: <b>{it.color}</b></p>
-            {it.customText && <p className="text-[10px] text-orange-300 font-bold mt-0.5">🎨 Estampa: "{it.customText}"</p>}
-          </div>
-        ))}
-      </div>
+        <div class="section">
+          <b>ITENS DA ENCOMENDA:</b><br/><br/>
+          ${itemsList.map(it => `
+            <div class="item">
+              <b>${it.quantity}x ${it.name}</b><br/>
+              &nbsp;&nbsp;• Tam: <b>${it.size || 'G'}</b><br/>
+              &nbsp;&nbsp;• Valor: R$ ${(Number(it.price) * Number(it.quantity)).toFixed(2)}
+            </div>
+          `).join('')}
+        </div>
 
-      <div className="flex justify-between items-center text-xs font-bold">
-        <span>TOTAL:</span>
-        <span className="text-green-400">R$ {Number(order.total || 0).toFixed(2)}</span>
-      </div>
+        <div class="section">
+          Subtotal: R$ ${Number(order.subtotal || 0).toFixed(2)}<br/>
+          Frete: R$ ${Number(order.delivery_fee || 0).toFixed(2)}
+          <div class="total">TOTAL: R$ ${Number(order.total || 0).toFixed(2)}</div>
+        </div>
 
-      {/* BOTÕES DE NAVEGAÇÃO DA PRODUÇÃO */}
-      <div className="pt-1">
-        {(!order.status || order.status === 'recebido') && (
-          <button onClick={() => { updateOrderStatus(order.id, 'em_producao'); sendWhatsAppStatus(order, 'producao'); }} className="w-full bg-blue-600 hover:bg-blue-700 py-2 rounded-xl text-xs font-bold text-white">
-            👕 Iniciar Estamparia / Confecção ➔
-          </button>
-        )}
+        <div class="footer">
+          Impresso em ${new Date().toLocaleString('pt-BR')}<br/>
+          Obrigado pela preferência!
+        </div>
 
-        {order.status === 'em_producao' && (
-          <button onClick={() => { updateOrderStatus(order.id, 'enviado'); sendWhatsAppStatus(order, 'enviado'); }} className="w-full bg-purple-600 hover:bg-purple-700 py-2 rounded-xl text-xs font-bold text-white">
-            📦 Marcar como Enviado ➔
-          </button>
-        )}
+        <script>
+          window.onload = function() { window.print(); window.close(); };
+        </script>
+      </body>
+      </html>
+    `;
 
-        {(order.status === 'saiu_entrega' || order.status === 'enviado') && (
-          <button onClick={() => updateOrderStatus(order.id, 'concluido')} className="w-full bg-green-600 hover:bg-green-700 py-2 rounded-xl text-xs font-bold text-white">
-            ✅ Concluir Pedido
-          </button>
-        )}
-      </div>
-    </div>
-  );
+    printWindow.document.write(htmlContent);
+    printWindow.document.close();
+  };
+
+  if (loading) return <div className="min-h-screen bg-gray-950 text-white flex items-center justify-center font-sans"><p className="text-xs text-gray-400">Carregando Fila de Produção...</p></div>;
+
+  const novos = orders.filter(o => o.status === 'recebido' || !o.status);
+  const emProducao = orders.filter(o => o.status === 'em_producao' || o.status === 'preparando');
+  const concluidos = orders.filter(o => o.status === 'pronto' || o.status === 'concluido' || o.status === 'entregue');
 
   return (
-    <div className="min-h-screen bg-gray-950 text-white p-4 font-sans max-w-7xl mx-auto pb-12">
-      <header className="flex justify-between items-center py-4 border-b border-gray-800 mb-6">
-        <div>
-          <h1 className="font-bold text-xl text-orange-500">👕 Fila de Produção — {tenant.name}</h1>
-          <p className="text-xs text-gray-400">Acompanhe a estamparia e envio de encomendas dos clientes.</p>
+    <div className="min-h-screen bg-gray-950 text-white p-4 font-sans pb-16">
+      <header className="flex justify-between items-center py-4 border-b border-gray-800 mb-6 max-w-7xl mx-auto">
+        <div className="flex items-center space-x-3">
+          <div className="w-10 h-10 rounded-2xl bg-blue-600 flex items-center justify-center font-bold text-xl text-white">👕</div>
+          <div>
+            <h1 className="font-bold text-lg text-white">Fila de Produção — {tenant?.name}</h1>
+            <p className="text-xs text-gray-400">Acompanhe a estamparia, confecção e envio dos pedidos</p>
+          </div>
         </div>
-        <button onClick={() => fetchOrders(tenant.id)} className="bg-orange-500 hover:bg-orange-600 px-3 py-2 rounded-xl text-xs font-bold transition">
+        <button onClick={fetchData} className="bg-orange-500 hover:bg-orange-600 text-white text-xs font-bold px-4 py-2 rounded-xl transition">
           🔄 Recarregar
         </button>
       </header>
 
-      {/* KANBAN EM 3 COLUNAS */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-        <div className="bg-gray-900/60 p-3 rounded-2xl border border-yellow-500/30 space-y-3">
-          <h2 className="font-bold text-xs text-yellow-400 uppercase tracking-wider border-b border-yellow-500/30 pb-2">🟡 1. PEDIDOS NOVOS ({recebidosOrders.length})</h2>
-          <div className="space-y-3">{recebidosOrders.map(o => renderOrderCard(o))}</div>
+      {/* COLUNAS DE PRODUÇÃO */}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4 max-w-7xl mx-auto">
+        
+        {/* COLUNA 1: PEDIDOS NOVOS */}
+        <div className="bg-gray-900 border border-gray-800 rounded-3xl p-4 space-y-3">
+          <h2 className="font-bold text-xs text-yellow-400 uppercase tracking-wider flex justify-between items-center border-b border-gray-800 pb-2">
+            <span>🟡 1. Novas Encomendas ({novos.length})</span>
+          </h2>
+
+          {novos.map(o => (
+            <div key={o.id} className="bg-gray-950 p-4 rounded-2xl border border-gray-800 space-y-3 shadow-lg">
+              <div className="flex justify-between items-start">
+                <div>
+                  <h3 className="font-bold text-sm text-white">PEDIDO #{o.id}</h3>
+                  <p className="text-xs text-gray-300 font-bold mt-0.5">{o.customer_name}</p>
+                  <p className="text-[11px] text-gray-400">📱 {o.customer_phone}</p>
+                </div>
+
+                <button onClick={() => togglePaymentStatus(o)} className={`text-[10px] font-bold px-2.5 py-1 rounded-xl border ${o.payment_method?.includes('PAGO') ? 'bg-green-500/20 text-green-400 border-green-500/30' : 'bg-red-500/20 text-red-400 border-red-500/30'}`}>
+                  {o.payment_method?.includes('PAGO') ? '🟢 PAGO' : '🔴 PENDENTE'}
+                </button>
+              </div>
+
+              <div className="bg-gray-900 p-2.5 rounded-xl border border-gray-800/80 text-xs space-y-1">
+                <p className="text-gray-400 text-[11px]"><b>Endereço:</b> {o.address}</p>
+                <p className="text-blue-400 text-[11px]"><b>Envio:</b> {o.neighborhood || 'Envio Padrão'}</p>
+              </div>
+
+              <div className="space-y-1 border-t border-gray-800 pt-2 text-xs">
+                {Array.isArray(o.items) && o.items.map((it, idx) => (
+                  <div key={idx} className="flex justify-between text-gray-200">
+                    <span><b>{it.quantity}x</b> {it.name} (Tam: <b>{it.size}</b>)</span>
+                    <span className="font-bold">R$ {(Number(it.price) * Number(it.quantity)).toFixed(2)}</span>
+                  </div>
+                ))}
+              </div>
+
+              <div className="flex justify-between items-center pt-2 border-t border-gray-800 text-xs">
+                <span className="font-bold text-green-400">TOTAL: R$ {Number(o.total).toFixed(2)}</span>
+                <button onClick={() => handlePrintOrder(o)} className="bg-gray-800 hover:bg-gray-700 text-gray-200 px-2.5 py-1 rounded-lg font-bold text-[11px] border border-gray-700">
+                  🖨️ Imprimir Pedido
+                </button>
+              </div>
+
+              <button onClick={() => updateOrderStatus(o.id, 'em_producao')} className="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-2.5 rounded-xl text-xs transition">
+                👕 Iniciar Estamparia / Confecção ➔
+              </button>
+            </div>
+          ))}
         </div>
 
-        <div className="bg-gray-900/60 p-3 rounded-2xl border border-blue-500/30 space-y-3">
-          <h2 className="font-bold text-xs text-blue-400 uppercase tracking-wider border-b border-blue-500/30 pb-2">👕 2. EM ESTAMPARIA / CORTE ({producaoOrders.length})</h2>
-          <div className="space-y-3">{producaoOrders.map(o => renderOrderCard(o))}</div>
+        {/* COLUNA 2: EM PRODUÇÃO */}
+        <div className="bg-gray-900 border border-gray-800 rounded-3xl p-4 space-y-3">
+          <h2 className="font-bold text-xs text-blue-400 uppercase tracking-wider flex justify-between items-center border-b border-gray-800 pb-2">
+            <span>👕 2. Em Estamparia / Corte ({emProducao.length})</span>
+          </h2>
+
+          {emProducao.map(o => (
+            <div key={o.id} className="bg-gray-950 p-4 rounded-2xl border border-blue-500/30 space-y-3 shadow-lg">
+              <div className="flex justify-between items-start">
+                <div>
+                  <h3 className="font-bold text-sm text-white">PEDIDO #{o.id}</h3>
+                  <p className="text-xs text-gray-300 font-bold mt-0.5">{o.customer_name}</p>
+                </div>
+                <button onClick={() => togglePaymentStatus(o)} className={`text-[10px] font-bold px-2.5 py-1 rounded-xl border ${o.payment_method?.includes('PAGO') ? 'bg-green-500/20 text-green-400 border-green-500/30' : 'bg-red-500/20 text-red-400 border-red-500/30'}`}>
+                  {o.payment_method?.includes('PAGO') ? '🟢 PAGO' : '🔴 PENDENTE'}
+                </button>
+              </div>
+
+              <div className="space-y-1 border-t border-gray-800 pt-2 text-xs">
+                {Array.isArray(o.items) && o.items.map((it, idx) => (
+                  <div key={idx} className="flex justify-between text-gray-200">
+                    <span><b>{it.quantity}x</b> {it.name} (Tam: <b>{it.size}</b>)</span>
+                  </div>
+                ))}
+              </div>
+
+              <div className="flex justify-between items-center pt-2 border-t border-gray-800 text-xs">
+                <span className="font-bold text-green-400">R$ {Number(o.total).toFixed(2)}</span>
+                <button onClick={() => handlePrintOrder(o)} className="bg-gray-800 hover:bg-gray-700 text-gray-200 px-2.5 py-1 rounded-lg font-bold text-[11px] border border-gray-700">
+                  🖨️ Imprimir
+                </button>
+              </div>
+
+              <button onClick={() => updateOrderStatus(o.id, 'pronto')} className="w-full bg-green-600 hover:bg-green-700 text-white font-bold py-2.5 rounded-xl text-xs transition">
+                📦 Marcar como Pronto / Enviado ➔
+              </button>
+            </div>
+          ))}
         </div>
 
-        <div className="bg-gray-900/60 p-3 rounded-2xl border border-purple-500/30 space-y-3">
-          <h2 className="font-bold text-xs text-purple-400 uppercase tracking-wider border-b border-purple-500/30 pb-2">📦 3. PRONTOS / ENVIADOS ({enviadosOrders.length})</h2>
-          <div className="space-y-3">{enviadosOrders.map(o => renderOrderCard(o))}</div>
+        {/* COLUNA 3: PRONTOS / ENVIADOS */}
+        <div className="bg-gray-900 border border-gray-800 rounded-3xl p-4 space-y-3">
+          <h2 className="font-bold text-xs text-green-400 uppercase tracking-wider flex justify-between items-center border-b border-gray-800 pb-2">
+            <span>📦 3. Prontos / Enviados ({concluidos.length})</span>
+          </h2>
+
+          {concluidos.map(o => (
+            <div key={o.id} className="bg-gray-950 p-4 rounded-2xl border border-gray-800 space-y-2 opacity-80">
+              <div className="flex justify-between items-start">
+                <div>
+                  <h3 className="font-bold text-sm text-white">PEDIDO #{o.id}</h3>
+                  <p className="text-xs text-gray-300">{o.customer_name}</p>
+                </div>
+                <span className="text-[10px] font-bold px-2.5 py-1 rounded-xl bg-green-500/20 text-green-400 border border-green-500/30">
+                  ✓ ENVIADO
+                </span>
+              </div>
+              <button onClick={() => handlePrintOrder(o)} className="w-full bg-gray-900 hover:bg-gray-800 text-gray-300 py-1.5 rounded-xl font-bold text-[11px] border border-gray-800 mt-2">
+                🖨️ Reimprimir Etiqueta
+              </button>
+            </div>
+          ))}
         </div>
+
       </div>
     </div>
   );
