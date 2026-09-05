@@ -17,6 +17,11 @@ export default function CatalogoRoupas() {
   const [cart, setCart] = useState([]);
   const [showCartModal, setShowCartModal] = useState(false);
 
+  // CUPOM DE DESCONTO
+  const [couponInput, setCouponInput] = useState('');
+  const [appliedCoupon, setAppliedCoupon] = useState(null);
+  const [couponError, setCouponError] = useState('');
+
   // MODAL DE DETALHES DO PRODUTO
   const [activeProduct, setActiveProduct] = useState(null);
   const [selectedSize, setSelectedSize] = useState('G');
@@ -79,9 +84,45 @@ export default function CatalogoRoupas() {
     setCart(cart.filter(item => item.cartId !== cartId));
   };
 
+  // CÁLCULO DOS VALORES
   const subtotalCart = cart.reduce((acc, item) => acc + (item.price * item.quantity), 0);
   const shippingFee = selectedShipping ? Number(selectedShipping.fee || 0) : 0;
-  const totalCart = subtotalCart + shippingFee;
+
+  let discountAmount = 0;
+  if (appliedCoupon) {
+    if (appliedCoupon.discount_type === 'percent') {
+      discountAmount = subtotalCart * (Number(appliedCoupon.discount_value) / 100);
+    } else {
+      discountAmount = Number(appliedCoupon.discount_value);
+    }
+  }
+  if (discountAmount > subtotalCart) discountAmount = subtotalCart;
+
+  const totalCart = Math.max(0, subtotalCart + shippingFee - discountAmount);
+
+  // VALIDAR CUPOM DE DESCONTO
+  const handleApplyCoupon = async (e) => {
+    e.preventDefault();
+    setCouponError('');
+    if (!couponInput.trim()) return;
+
+    const cleanCode = couponInput.trim().toUpperCase();
+    const { data: cData, error } = await supabase
+      .from('coupons')
+      .select('*')
+      .eq('tenant_id', tenant.id)
+      .eq('code', cleanCode)
+      .eq('active', true)
+      .maybeSingle();
+
+    if (error || !cData) {
+      setCouponError('Cupom inválido ou expirado');
+      setAppliedCoupon(null);
+    } else {
+      setAppliedCoupon(cData);
+      setCouponError('');
+    }
+  };
 
   // FINALIZAR PEDIDO NO WHATSAPP
   const handleCheckout = async (e) => {
@@ -130,6 +171,9 @@ export default function CatalogoRoupas() {
 
     msg += `\n*Subtotal:* R$ ${subtotalCart.toFixed(2)}`;
     msg += `\n*Frete:* R$ ${shippingFee.toFixed(2)}`;
+    if (appliedCoupon) {
+      msg += `\n*Cupom (${appliedCoupon.code}):* - R$ ${discountAmount.toFixed(2)}`;
+    }
     msg += `\n*TOTAL:* *R$ ${totalCart.toFixed(2)}*`;
 
     const cleanWhatsapp = tenant.whatsapp.replace(/\D/g, '');
@@ -137,6 +181,8 @@ export default function CatalogoRoupas() {
 
     setCart([]);
     setShowCartModal(false);
+    setAppliedCoupon(null);
+    setCouponInput('');
     alert("Pedido enviado com sucesso!");
   };
 
@@ -267,6 +313,34 @@ export default function CatalogoRoupas() {
               ))}
             </div>
 
+            {/* SEÇÃO DE CUPOM DE DESCONTO */}
+            <div className="pt-2 border-t border-white/10 space-y-1.5">
+              <label className="text-[11px] font-bold block opacity-90">🎟️ Cupom de Desconto:</label>
+              <div className="flex space-x-2">
+                <input
+                  type="text"
+                  placeholder="Ex: PRIMEIRA10"
+                  value={couponInput}
+                  onChange={(e) => setCouponInput(e.target.value)}
+                  style={{ backgroundColor: secondaryColor, color: textColor, borderColor: 'rgba(255,255,255,0.15)' }}
+                  className="flex-1 border p-2 rounded-xl text-xs uppercase focus:outline-none"
+                />
+                <button
+                  type="button"
+                  onClick={handleApplyCoupon}
+                  style={{ backgroundColor: primaryColor, color: buttonTextColor }}
+                  className="px-3.5 py-2 rounded-xl text-xs font-bold">
+                  Aplicar
+                </button>
+              </div>
+              {appliedCoupon && (
+                <p className="text-[11px] text-green-400 font-bold">
+                  ✓ Cupom {appliedCoupon.code} aplicado ({appliedCoupon.discount_type === 'percent' ? `${appliedCoupon.discount_value}%` : `R$ ${appliedCoupon.discount_value}`} de desconto)!
+                </p>
+              )}
+              {couponError && <p className="text-[11px] text-red-400 font-bold">{couponError}</p>}
+            </div>
+
             <form onSubmit={handleCheckout} className="space-y-2.5 pt-2 border-t border-white/10 text-xs">
               <h4 className="font-bold text-xs opacity-90">Dados de Envio & Frete</h4>
               <input type="text" required placeholder="Seu Nome Completo" value={customerName} onChange={(e) => setCustomerName(e.target.value)} style={{ backgroundColor: secondaryColor, color: textColor, borderColor: 'rgba(255,255,255,0.15)' }} className="w-full border p-2.5 rounded-xl focus:outline-none" />
@@ -288,8 +362,11 @@ export default function CatalogoRoupas() {
 
               {/* RESUMO DO VALOR */}
               <div className="bg-black/30 p-3 rounded-2xl border border-white/10 space-y-1">
-                <div className="flex justify-between text-[11px]"><span>Subtotal das peças:</span><span>R$ {subtotalCart.toFixed(2)}</span></div>
-                <div className="flex justify-between text-[11px]"><span>Taxa de Frete:</span><span className="text-blue-400">+ R$ {shippingFee.toFixed(2)}</span></div>
+                <div className="flex justify-between text-[11px]"><span>Subtotal:</span><span>R$ {subtotalCart.toFixed(2)}</span></div>
+                <div className="flex justify-between text-[11px]"><span>Frete:</span><span className="text-blue-400">+ R$ {shippingFee.toFixed(2)}</span></div>
+                {appliedCoupon && (
+                  <div className="flex justify-between text-[11px] text-green-400"><span>Desconto ({appliedCoupon.code}):</span><span>- R$ {discountAmount.toFixed(2)}</span></div>
+                )}
                 <div className="flex justify-between font-bold text-xs pt-1 border-t border-white/10 text-green-400"><span>Total Final:</span><span>R$ {totalCart.toFixed(2)}</span></div>
               </div>
 
