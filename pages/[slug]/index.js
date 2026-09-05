@@ -1,434 +1,378 @@
 import React, { useState, useEffect } from 'react';
 import { useRouter } from 'next/router';
-import Head from 'next/head';
 import { supabase } from '../../lib/supabase';
 
-export default function CardapioTenant() {
+export default function CatalogoRoupas() {
   const router = useRouter();
   const { slug } = router.query;
 
   const [tenant, setTenant] = useState(null);
   const [categories, setCategories] = useState([]);
   const [products, setProducts] = useState([]);
-  const [neighborhoods, setNeighborhoods] = useState([]);
-  const [cart, setCart] = useState([]);
   const [loading, setLoading] = useState(true);
 
-  // FILTROS DE CATEGORIA E BUSCA
+  // ESTADOS DO CARRINHO & PRODUTO SELECIONADO
   const [selectedCategory, setSelectedCategory] = useState('ALL');
-  const [searchTerm, setSearchTerm] = useState('');
+  const [cart, setCart] = useState([]);
+  const [showCartModal, setShowCartModal] = useState(false);
 
-  // MODAL E CHECKOUT
-  const [selectedProduct, setSelectedProduct] = useState(null);
-  const [quantity, setQuantity] = useState(1);
-  const [selectedAddons, setSelectedAddons] = useState([]);
-  const [itemObs, setItemObs] = useState('');
+  // MODAL DE DETALHES DO PRODUTO (TAMANHO, COR E PERSONALIZAÇÃO)
+  const [activeProduct, setActiveProduct] = useState(null);
+  const [selectedSize, setSelectedSize] = useState('G');
+  const [selectedColor, setSelectedColor] = useState('Preto');
+  const [customText, setCustomText] = useState(''); // Nome/Número para estampar
+  const [productQuantity, setProductQuantity] = useState(1);
 
-  const [isCheckoutOpen, setIsCheckoutOpen] = useState(false);
+  // DADOS DE ENTREGA DO CLIENTE
   const [customerName, setCustomerName] = useState('');
   const [customerPhone, setCustomerPhone] = useState('');
-  const [orderType, setOrderType] = useState('delivery');
-  const [selectedNeigh, setSelectedNeigh] = useState('');
-  const [address, setAddress] = useState('');
-  const [reference, setReference] = useState('');
-  const [paymentMethod, setPaymentMethod] = useState('PIX');
+  const [customerAddress, setCustomerAddress] = useState('');
+  const [customerZip, setCustomerZip] = useState('');
+  const [shippingMethod, setShippingMethod] = useState('PAC (Envio Correios)');
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   useEffect(() => {
-    if (slug) fetchTenantData();
-  }, [slug]);
-
-  const fetchTenantData = async () => {
-    setLoading(true);
-    const { data: tData, error: tErr } = await supabase
-      .from('tenants')
-      .select('*')
-      .eq('slug', slug)
-      .single();
-
-    if (tErr || !tData) {
-      setTenant(null);
-      setLoading(false);
-      return;
+    if (router.isReady && slug) {
+      fetchTenantAndProducts();
     }
+  }, [router.isReady, slug]);
 
-    setTenant(tData);
+  const fetchTenantAndProducts = async () => {
+    setLoading(true);
+    const cleanSlug = String(slug).toLowerCase().trim();
+    const { data: tData } = await supabase.from('tenants').select('*').eq('slug', cleanSlug).maybeSingle();
 
-    if (tData.active !== false) {
-      const { data: cData } = await supabase.from('categories').select('*').eq('tenant_id', tData.id).order('id', { ascending: true });
-      const { data: pData } = await supabase.from('products').select('*').eq('tenant_id', tData.id).eq('active', true).order('id', { ascending: true });
-      const { data: nData } = await supabase.from('neighborhoods').select('*').eq('tenant_id', tData.id).order('id', { ascending: true });
+    if (tData) {
+      setTenant(tData);
+      const { data: cData } = await supabase.from('categories').select('*').eq('tenant_id', tData.id);
+      const { data: pData } = await supabase.from('products').select('*').eq('tenant_id', tData.id).eq('active', true);
 
       if (cData) setCategories(cData);
       if (pData) setProducts(pData);
-      if (nData) {
-        setNeighborhoods(nData);
-        if (nData.length > 0) setSelectedNeigh(nData[0].name);
-      }
     }
-
     setLoading(false);
   };
 
-  // VALIDAÇÃO DE HORÁRIO DE FUNCIONAMENTO
-  const checkIfStoreIsOpen = () => {
-    if (!tenant?.opening_time || !tenant?.closing_time) return true;
-    const now = new Date();
-    const currentMin = now.getHours() * 60 + now.getMinutes();
-
-    const [openH, openM] = tenant.opening_time.split(':').map(Number);
-    const [closeH, closeM] = tenant.closing_time.split(':').map(Number);
-
-    const openMin = openH * 60 + openM;
-    let closeMin = closeH * 60 + closeM;
-
-    if (closeMin < openMin) closeMin += 24 * 60; // Caso o horário passe da meia-noite
-
-    return currentMin >= openMin && currentMin <= closeMin;
-  };
-
-  const isOpen = checkIfStoreIsOpen();
-
-  if (loading) return <div className="min-h-screen bg-gray-950 text-white flex items-center justify-center font-sans"><p className="text-sm text-gray-400">Carregando cardápio...</p></div>;
-
-  if (!tenant) return <div className="min-h-screen bg-gray-950 text-white flex items-center justify-center font-sans"><h1 className="text-xl font-bold text-orange-500">Restaurante não encontrado</h1></div>;
-
-  if (tenant.active === false) {
-    return (
-      <div className="min-h-screen bg-gray-950 text-white flex flex-col items-center justify-center p-6 text-center font-sans">
-        <div className="bg-gray-900 border border-red-500/30 p-8 rounded-3xl max-w-sm space-y-3">
-          <span className="text-4xl block">🛑</span>
-          <h1 className="font-bold text-lg text-red-400">Estabelecimento Indisponível</h1>
-          <p className="text-xs text-gray-400">O cardápio de <b>{tenant.name}</b> está suspenso temporariamente.</p>
-        </div>
-      </div>
-    );
-  }
-
-  const primaryColor = tenant.primary_color || '#FF8C00';
-  const secondaryColor = tenant.secondary_color || '#111827';
-
-  // LISTA DE BANNERS DE PROMOÇÃO
-  const promoBannersList = tenant.promo_banners ? tenant.promo_banners.split(',').map(s => s.trim()).filter(Boolean) : [];
-
-  const subtotal = cart.reduce((acc, item) => acc + (item.totalPrice * item.quantity), 0);
-  const currentNeighObj = neighborhoods.find(n => n.name === selectedNeigh);
-  const deliveryFee = orderType === 'delivery' ? Number(currentNeighObj?.fee || 0) : 0;
-  const total = subtotal + deliveryFee;
-
-  const handleOpenModal = (prod) => {
-    if (!isOpen) return;
-    setSelectedProduct(prod);
-    setQuantity(1);
-    setSelectedAddons([]);
-    setItemObs('');
-  };
-
-  const handleToggleAddon = (addon) => {
-    const exists = selectedAddons.find(a => a.name === addon.name);
-    if (exists) setSelectedAddons(selectedAddons.filter(a => a.name !== addon.name));
-    else setSelectedAddons([...selectedAddons, addon]);
-  };
-
-  const calculateUnitTotal = () => {
-    if (!selectedProduct) return 0;
-    const addonsTotal = selectedAddons.reduce((acc, a) => acc + Number(a.price), 0);
-    return Number(selectedProduct.price) + addonsTotal;
-  };
-
+  // ADICIONAR ITEM AO CARRINHO COM OPÇÕES
   const handleAddToCart = () => {
-    const unitPrice = calculateUnitTotal();
-    const addonsText = selectedAddons.map(a => `${a.name} (+R$${a.price.toFixed(2)})`).join(', ');
-    let details = addonsText ? `Adicionais: ${addonsText}` : '';
-    if (itemObs) details += details ? ` | Obs: ${itemObs}` : `Obs: ${itemObs}`;
+    if (!activeProduct) return;
 
-    const newItem = {
-      id: `${selectedProduct.id}-${Date.now()}`,
-      name: selectedProduct.name,
-      quantity,
-      unitPrice,
-      totalPrice: unitPrice,
-      details
+    const cartItem = {
+      cartId: `${activeProduct.id}-${selectedSize}-${selectedColor}-${Date.now()}`,
+      productId: activeProduct.id,
+      name: activeProduct.name,
+      price: Number(activeProduct.price || 0),
+      quantity: productQuantity,
+      size: selectedSize,
+      color: selectedColor,
+      customText: customText.trim(),
+      imageUrl: activeProduct.image_url
     };
 
-    setCart([...cart, newItem]);
-    setSelectedProduct(null);
+    setCart([...cart, cartItem]);
+    setActiveProduct(null);
+    setCustomText('');
+    setProductQuantity(1);
   };
 
-  const handleSendOrder = async (e) => {
+  const handleRemoveFromCart = (cartId) => {
+    setCart(cart.filter(item => item.cartId !== cartId));
+  };
+
+  const totalCart = cart.reduce((acc, item) => acc + (item.price * item.quantity), 0);
+
+  // FINALIZAR PEDIDO NO WHATSAPP
+  const handleCheckout = async (e) => {
     e.preventDefault();
-    if (!isOpen) return alert("O estabelecimento está fechado no momento.");
-    if (!customerName || !customerPhone) return alert("Preencha seu Nome e WhatsApp!");
-    if (orderType === 'delivery' && (!address || !selectedNeigh)) return alert("Preencha o Endereço!");
+    if (cart.length === 0) return alert("Seu carrinho está vazio!");
+    if (!customerName || !customerPhone || !customerAddress) return alert("Preencha Nome, WhatsApp e Endereço Completo!");
+
+    setIsSubmitting(true);
 
     const orderData = {
       tenant_id: tenant.id,
       customer_name: customerName,
-      customer_phone: customerPhone,
-      order_type: orderType,
-      neighborhood: orderType === 'delivery' ? selectedNeigh : '',
-      address: orderType === 'delivery' ? address : '',
-      reference: orderType === 'delivery' ? reference : '',
-      payment_method: paymentMethod,
+      customer_phone: customerPhone.replace(/\D/g, ''),
+      address: customerAddress,
+      neighborhood: customerZip ? `CEP: ${customerZip}` : 'Envio Nacional',
+      order_type: 'entrega',
       items: cart,
-      subtotal,
-      delivery_fee: deliveryFee,
-      total,
+      total: totalCart,
+      payment_method: 'PIX / Cartão no WhatsApp',
       status: 'recebido',
-      is_paid: false
+      archived: false
     };
 
     const { data: createdOrder, error } = await supabase.from('orders').insert([orderData]).select().single();
-    if (error) return alert("Erro ao enviar pedido: " + error.message);
 
-    let text = `*NOVO PEDIDO #${createdOrder.id} - ${tenant.name.toUpperCase()}*\n\n`;
-    text += `*Cliente:* ${customerName}\n*Telefone:* ${customerPhone}\n*Tipo:* ${orderType === 'delivery' ? 'Entrega 🛵' : 'Retirada 🛍️'}\n`;
-    if (orderType === 'delivery') text += `*Bairro:* ${selectedNeigh}\n*Endereço:* ${address}\n`;
-    text += `*Pagamento:* ${paymentMethod}\n\n*ITENS:*\n`;
-    cart.forEach(it => {
-      text += `• ${it.quantity}x ${it.name} (R$ ${Number(it.totalPrice * it.quantity).toFixed(2)})\n`;
-      if (it.details) text += `   _${it.details}_\n`;
-    });
-    text += `\n*TOTAL:* *R$ ${total.toFixed(2)}*`;
+    setIsSubmitting(false);
 
-    if (tenant.custom_message) {
-      text += `\n\n📌 _${tenant.custom_message}_`;
+    if (error) {
+      return alert("Erro ao enviar pedido: " + error.message);
     }
 
+    // FORMATAR MENSAGEM DO WHATSAPP COM OS DETALHES DE PERSONALIZAÇÃO
+    let msg = `*NOVO PEDIDO #${createdOrder.id} - ${tenant.name.toUpperCase()}*\n\n`;
+    msg += `*Cliente:* ${customerName}\n*WhatsApp:* ${customerPhone}\n`;
+    msg += `*Endereço:* ${customerAddress}\n`;
+    if (customerZip) msg += `*CEP:* ${customerZip}\n`;
+    msg += `*Forma de Envio:* ${shippingMethod}\n\n`;
+    msg += `*ITENS SOLICITADOS:*\n`;
+
+    cart.forEach((item, idx) => {
+      msg += `\n${idx + 1}. *${item.quantity}x ${item.name}* - R$ ${(item.price * item.quantity).toFixed(2)}\n`;
+      msg += `   • *Tamanho:* ${item.size} | *Cor:* ${item.color}\n`;
+      if (item.customText) {
+        msg += `   • ✏️ *Estampa/Nome:* "${item.customText}"\n`;
+      }
+    });
+
+    msg += `\n*TOTAL DO PEDIDO:* *R$ ${totalCart.toFixed(2)}*`;
+
     const cleanWhatsapp = tenant.whatsapp.replace(/\D/g, '');
-    window.open(`https://wa.me/${cleanWhatsapp}?text=${encodeURIComponent(text)}`, '_blank');
+    window.open(`https://wa.me/55${cleanWhatsapp}?text=${encodeURIComponent(msg)}`, '_blank');
+
     setCart([]);
-    setIsCheckoutOpen(false);
+    setShowCartModal(false);
+    alert("Pedido enviado com sucesso para a produção!");
   };
 
-  const parsedAddons = selectedProduct?.addons_list ? selectedProduct.addons_list.split(',').filter(Boolean).map(str => {
-    const parts = str.split(':');
-    return { name: parts[0], price: parseFloat(parts[1] || 0) };
-  }) : [];
+  if (loading) return <div className="min-h-screen bg-gray-950 text-white flex items-center justify-center font-sans"><p className="text-xs text-gray-400">Carregando Loja...</p></div>;
+  if (!tenant) return <div className="min-h-screen bg-gray-950 text-white flex items-center justify-center font-sans"><h1 className="text-xl font-bold text-orange-500">Loja não encontrada</h1></div>;
+
+  const filteredProducts = selectedCategory === 'ALL' 
+    ? products 
+    : products.filter(p => String(p.category_id) === String(selectedCategory));
 
   return (
-    <div className="min-h-screen text-white font-sans pb-24 max-w-md mx-auto" style={{ backgroundColor: secondaryColor }}>
-      {/* INTEGRAÇÃO DO META PIXEL */}
-      {tenant.pixel_id && (
-        <Head>
-          <script
-            dangerouslySetInnerHTML={{
-              __html: `
-                !function(f,b,e,v,n,t,s)
-                {if(f.fbq)return;n=f.fbq=function(){n.callMethod?
-                n.callMethod.apply(n,arguments):n.queue.push(arguments)};
-                if(!f._fbq)f._fbq=n;n.push=n;n.loaded=!0;n.version='2.0';
-                n.queue=[];t=b.createElement(e);t.async=!0;
-                t.src=v;s=b.getElementsByTagName(e)[0];
-                s.parentNode.insertBefore(t,s)}(window, document,'script',
-                'https://connect.facebook.net/en_US/fbevents.js');
-                fbq('init', '${tenant.pixel_id}');
-                fbq('track', 'PageView');
-              `,
-            }}
-          />
-        </Head>
-      )}
-
-      {/* BANNER E LOGO */}
+    <div className="min-h-screen bg-gray-950 text-white font-sans pb-24 max-w-md mx-auto">
+      
+      {/* CAPA & BANNER DA LOJA */}
       <div className="relative h-40 bg-gray-900 border-b border-gray-800">
-        <img src={tenant.banner_url || 'https://images.unsplash.com/photo-1555396273-367ea4eb4db5?w=800&auto=format&fit=crop&q=80'} alt="Banner" className="w-full h-full object-cover opacity-60" />
+        <img src={tenant.banner_url || 'https://images.unsplash.com/photo-1441986300917-64674bd600d8?w=800&auto=format&fit=crop&q=80'} alt="Capa" className="w-full h-full object-cover opacity-40" />
+        
         <div className="absolute -bottom-6 left-4 flex items-center space-x-3">
-          <img src={tenant.logo_url || 'https://images.unsplash.com/photo-1550547660-d9450f859349?w=150&auto=format&fit=crop&q=80'} alt="Logo" className="w-16 h-16 rounded-full border-2 border-gray-950 object-cover bg-gray-800 shadow-lg" />
-          <div className="pt-6">
+          <img src={tenant.logo_url || 'https://images.unsplash.com/photo-1521572267360-ee0c2909d518?w=150&auto=format&fit=crop&q=80'} alt="Logo" className="w-16 h-16 rounded-2xl border-2 border-gray-950 object-cover bg-gray-800 shadow-xl" />
+          <div className="pt-5">
             <h1 className="font-bold text-lg text-white leading-tight">{tenant.name}</h1>
-            <span className={`text-[10px] px-2 py-0.5 rounded font-bold ${isOpen ? 'bg-green-500/20 text-green-400' : 'bg-red-500/20 text-red-400'}`}>
-              {isOpen ? '🟢 Aberto Agora' : `🔴 Fechado (Abre às ${tenant.opening_time || '18:00'})`}
-            </span>
+            <p className="text-[11px] text-gray-400">👕 Camisas & Vestuário Personalizado</p>
           </div>
         </div>
       </div>
 
-      <div className="mt-8 px-4 space-y-4">
-        {/* CARROSSEL DE PROMOÇÕES */}
-        {promoBannersList.length > 0 && (
-          <div className="space-y-1">
-            <span className="text-[11px] font-bold text-gray-300 block">🔥 Destaques e Promoções</span>
-            <div className="flex space-x-3 overflow-x-auto pb-2 scrollbar-none">
-              {promoBannersList.map((url, idx) => (
-                <img key={idx} src={url} alt={`Promo ${idx}`} className="w-64 h-28 object-cover rounded-xl flex-shrink-0 border border-white/10 shadow-md" />
-              ))}
-            </div>
-          </div>
-        )}
-
-        {/* CAMPO DE BUSCA */}
-        <div>
-          <input 
-            type="text" 
-            placeholder="🔍 Buscar no cardápio..."
-            value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
-            className="w-full bg-black/40 border border-white/10 p-2.5 rounded-xl text-xs text-white focus:outline-none placeholder-gray-400"
-          />
-        </div>
-
-        {/* BARRA FIXA DESLIZANTE DE CATEGORIAS */}
-        <div className="flex space-x-2 overflow-x-auto pb-1 scrollbar-none border-b border-white/10">
-          <button 
+      {/* CATEGORIAS DA LOJA */}
+      <div className="mt-10 px-4 space-y-5">
+        <div className="flex space-x-2 overflow-x-auto pb-1 scrollbar-none">
+          <button
             onClick={() => setSelectedCategory('ALL')}
-            style={{ backgroundColor: selectedCategory === 'ALL' ? primaryColor : 'rgba(255,255,255,0.05)' }}
-            className="px-3.5 py-1.5 rounded-lg text-xs font-bold whitespace-nowrap text-white">
-            Todos
+            className={`px-3.5 py-2 rounded-xl text-xs font-bold whitespace-nowrap transition border ${
+              selectedCategory === 'ALL' ? 'bg-orange-500 border-orange-500 text-white' : 'bg-gray-900 border-gray-800 text-gray-400'
+            }`}>
+            Todas as Peças
           </button>
           {categories.map(cat => (
-            <button 
-              key={cat.id} 
+            <button
+              key={cat.id}
               onClick={() => setSelectedCategory(cat.id)}
-              style={{ backgroundColor: selectedCategory === cat.id ? primaryColor : 'rgba(255,255,255,0.05)' }}
-              className="px-3.5 py-1.5 rounded-lg text-xs font-bold whitespace-nowrap text-white">
+              className={`px-3.5 py-2 rounded-xl text-xs font-bold whitespace-nowrap transition border ${
+                String(selectedCategory) === String(cat.id) ? 'bg-orange-500 border-orange-500 text-white' : 'bg-gray-900 border-gray-800 text-gray-400'
+              }`}>
               {cat.name}
             </button>
           ))}
         </div>
 
-        {/* LISTA DE PRODUTOS */}
-        {categories.map(cat => {
-          if (selectedCategory !== 'ALL' && selectedCategory !== cat.id) return null;
+        {/* CATÁLOGO DE PRODUTOS */}
+        <div className="grid grid-cols-2 gap-3">
+          {filteredProducts.map(prod => (
+            <div
+              key={prod.id}
+              onClick={() => {
+                setActiveProduct(prod);
+                setSelectedSize('G');
+                setSelectedColor('Preto');
+                setProductQuantity(1);
+              }}
+              className="bg-gray-900 border border-gray-800 rounded-2xl p-2.5 space-y-2 cursor-pointer hover:border-orange-500/50 transition flex flex-col justify-between">
+              
+              <div className="space-y-2">
+                <img
+                  src={prod.image_url || 'https://images.unsplash.com/photo-1521572267360-ee0c2909d518?w=300&auto=format&fit=crop&q=80'}
+                  alt={prod.name}
+                  className="w-full h-36 object-cover rounded-xl bg-gray-950"
+                />
+                <h3 className="font-bold text-xs text-white line-clamp-2">{prod.name}</h3>
+              </div>
 
-          const catProducts = products.filter(p => {
-            const matchesCat = p.category_id === cat.id;
-            const matchesSearch = p.name.toLowerCase().includes(searchTerm.toLowerCase()) || 
-                                  (p.description && p.description.toLowerCase().includes(searchTerm.toLowerCase()));
-            return matchesCat && matchesSearch;
-          });
-
-          if (catProducts.length === 0) return null;
-
-          return (
-            <div key={cat.id} className="space-y-3 pt-2">
-              <h2 className="font-bold text-sm uppercase tracking-wider border-b border-gray-800/40 pb-1" style={{ color: primaryColor }}>
-                {cat.name}
-              </h2>
-              <div className="space-y-2.5">
-                {catProducts.map(prod => (
-                  <div key={prod.id} onClick={() => handleOpenModal(prod)} className={`bg-black/30 p-3 rounded-xl border border-white/10 flex justify-between items-center transition ${isOpen ? 'cursor-pointer hover:border-white/20' : 'opacity-60 cursor-not-allowed'}`}>
-                    <div className="flex-1 pr-3">
-                      <h3 className="font-bold text-xs text-white">{prod.name}</h3>
-                      {prod.description && <p className="text-[10px] text-gray-400 line-clamp-2 mt-0.5">{prod.description}</p>}
-                      <div className="flex items-center space-x-2 mt-1.5">
-                        <span className="text-xs font-bold" style={{ color: primaryColor }}>R$ {Number(prod.price).toFixed(2)}</span>
-                        <span className="text-[10px] bg-white/10 px-2 py-0.5 rounded font-bold text-gray-200">
-                          {isOpen ? '+ Pedir' : 'Fechado'}
-                        </span>
-                      </div>
-                    </div>
-                    {prod.image && <img src={prod.image} alt={prod.name} className="w-16 h-16 rounded-lg object-cover bg-gray-800" />}
-                  </div>
-                ))}
+              <div className="flex justify-between items-center pt-1 border-t border-gray-800/80">
+                <span className="text-orange-400 font-bold text-xs">R$ {Number(prod.price).toFixed(2)}</span>
+                <span className="bg-orange-500/10 text-orange-400 text-[10px] font-bold px-2 py-0.5 rounded-lg border border-orange-500/20">
+                  + Opções
+                </span>
               </div>
             </div>
-          );
-        })}
+          ))}
+        </div>
       </div>
 
-      {/* BARRA CARRINHO */}
-      {cart.length > 0 && isOpen && (
-        <div className="fixed bottom-0 left-0 right-0 max-w-md mx-auto p-3 bg-black/80 backdrop-blur border-t border-white/10 z-40">
-          <button onClick={() => setIsCheckoutOpen(true)} style={{ backgroundColor: primaryColor }} className="w-full font-bold py-3 px-4 rounded-xl text-xs flex justify-between items-center text-white shadow-lg">
-            <span>🛒 Ver Pedido ({cart.length})</span>
-            <span>R$ {subtotal.toFixed(2)} ➔</span>
+      {/* BARRA FLUTUANTE DO CARRINHO */}
+      {cart.length > 0 && (
+        <div className="fixed bottom-4 left-4 right-4 max-w-md mx-auto z-40">
+          <button
+            onClick={() => setShowCartModal(true)}
+            className="w-full bg-orange-500 hover:bg-orange-600 text-white font-bold p-3.5 rounded-2xl shadow-2xl flex justify-between items-center text-xs transition">
+            <span className="bg-black/30 px-2.5 py-1 rounded-lg">🛒 {cart.length} item(ns)</span>
+            <span>Ver Sacola de Compras ➔</span>
+            <span>R$ {totalCart.toFixed(2)}</span>
           </button>
         </div>
       )}
 
-      {/* MODAL ADICIONAR ITEM */}
-      {selectedProduct && (
-        <div className="fixed inset-0 bg-black/80 flex items-end justify-center z-50">
-          <div className="bg-gray-900 w-full max-w-md rounded-t-2xl p-4 border-t border-gray-800 max-h-[85vh] overflow-y-auto space-y-4">
-            <div className="flex justify-between items-start border-b border-gray-800 pb-2">
-              <div>
-                <h3 className="font-bold text-sm text-white">{selectedProduct.name}</h3>
-                <span className="text-xs font-bold" style={{ color: primaryColor }}>R$ {Number(selectedProduct.price).toFixed(2)}</span>
-              </div>
-              <button onClick={() => setSelectedProduct(null)} className="text-gray-400 font-bold text-sm">✕</button>
+      {/* MODAL DE OPÇÕES DO PRODUTO (TAMANHO, COR E PERSONALIZAÇÃO) */}
+      {activeProduct && (
+        <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 p-4">
+          <div className="bg-gray-900 border border-gray-800 w-full max-w-sm rounded-3xl p-5 space-y-4 shadow-2xl max-h-[90vh] overflow-y-auto">
+            <div className="flex justify-between items-center border-b border-gray-800 pb-2">
+              <h3 className="font-bold text-sm text-white">{activeProduct.name}</h3>
+              <button onClick={() => setActiveProduct(null)} className="text-gray-400 font-bold text-xs">✕ Fechar</button>
             </div>
 
-            {parsedAddons.length > 0 && (
-              <div className="space-y-2">
-                <label className="text-xs text-gray-400 font-bold block">Adicionais Opcionais:</label>
-                <div className="space-y-1.5">
-                  {parsedAddons.map((ad, idx) => {
-                    const isChecked = selectedAddons.some(a => a.name === ad.name);
-                    return (
-                      <label key={idx} className="flex justify-between items-center bg-gray-800 p-2.5 rounded-lg text-xs cursor-pointer">
-                        <div className="flex items-center space-x-2">
-                          <input type="checkbox" checked={isChecked} onChange={() => handleToggleAddon(ad)} className="rounded bg-gray-700" />
-                          <span>{ad.name}</span>
-                        </div>
-                        <span className="font-bold" style={{ color: primaryColor }}>+ R$ {ad.price.toFixed(2)}</span>
-                      </label>
-                    );
-                  })}
-                </div>
-              </div>
-            )}
+            <img
+              src={activeProduct.image_url || 'https://images.unsplash.com/photo-1521572267360-ee0c2909d518?w=300&auto=format&fit=crop&q=80'}
+              alt={activeProduct.name}
+              className="w-full h-44 object-cover rounded-2xl bg-gray-950"
+            />
 
-            <div>
-              <label className="text-xs text-gray-400 font-bold block mb-1">Observações:</label>
-              <input type="text" placeholder="Ex: Sem cebola..." value={itemObs} onChange={(e) => setItemObs(e.target.value)} className="w-full bg-gray-800 border border-gray-700 p-2.5 rounded-lg text-xs text-white focus:outline-none" />
+            <p className="text-xs text-gray-400">{activeProduct.description || 'Algodão 100% penteado de altíssima qualidade.'}</p>
+
+            {/* SELEÇÃO DE TAMANHO */}
+            <div className="space-y-1.5">
+              <label className="text-[11px] font-bold text-gray-300 block">1. Selecione o Tamanho:</label>
+              <div className="flex space-x-2">
+                {['P', 'M', 'G', 'GG', 'XGG'].map(size => (
+                  <button
+                    key={size}
+                    type="button"
+                    onClick={() => setSelectedSize(size)}
+                    className={`flex-1 py-2 rounded-xl font-bold text-xs border transition ${
+                      selectedSize === size ? 'bg-orange-500 border-orange-500 text-white' : 'bg-gray-800 border-gray-700 text-gray-300'
+                    }`}>
+                    {size}
+                  </button>
+                ))}
+              </div>
             </div>
 
-            <div className="flex items-center justify-between pt-2 border-t border-gray-800">
-              <div className="flex items-center space-x-3 bg-gray-800 rounded-lg p-1">
-                <button onClick={() => setQuantity(Math.max(1, quantity - 1))} className="w-7 h-7 bg-gray-700 font-bold rounded text-xs">-</button>
-                <span className="font-bold text-xs">{quantity}</span>
-                <button onClick={() => setQuantity(quantity + 1)} className="w-7 h-7 bg-gray-700 font-bold rounded text-xs">+</button>
+            {/* SELEÇÃO DE COR */}
+            <div className="space-y-1.5">
+              <label className="text-[11px] font-bold text-gray-300 block">2. Selecione a Cor:</label>
+              <div className="grid grid-cols-3 gap-2">
+                {['Preto', 'Branco', 'Mescla/Cinza', 'Marrom', 'Bege', 'Vermelho'].map(color => (
+                  <button
+                    key={color}
+                    type="button"
+                    onClick={() => setSelectedColor(color)}
+                    className={`py-1.5 px-2 rounded-xl font-bold text-[11px] border transition ${
+                      selectedColor === color ? 'bg-orange-500/20 border-orange-500 text-orange-400' : 'bg-gray-800 border-gray-700 text-gray-300'
+                    }`}>
+                    {color}
+                  </button>
+                ))}
               </div>
+            </div>
 
-              <button onClick={handleAddToCart} style={{ backgroundColor: primaryColor }} className="flex-1 ml-3 font-bold py-2.5 rounded-lg text-xs text-white">
-                Adicionar ({quantity}x = R$ {(calculateUnitTotal() * quantity).toFixed(2)})
+            {/* CAMPO DE PERSONALIZAÇÃO OPCIONAL */}
+            <div className="space-y-1">
+              <label className="text-[11px] font-bold text-gray-300 block">3. Nome/Número para Estampar (Opcional):</label>
+              <input
+                type="text"
+                placeholder="Ex: SILVA - #10 (ou deixe em branco)"
+                value={customText}
+                onChange={(e) => setCustomText(e.target.value)}
+                className="w-full bg-gray-950 border border-gray-800 p-2.5 rounded-xl text-xs text-white focus:outline-none focus:border-orange-500"
+              />
+            </div>
+
+            <div className="flex justify-between items-center pt-2">
+              <span className="font-bold text-sm text-green-400">R$ {(Number(activeProduct.price) * productQuantity).toFixed(2)}</span>
+              <button
+                type="button"
+                onClick={handleAddToCart}
+                className="bg-orange-500 hover:bg-orange-600 text-white font-bold px-5 py-2.5 rounded-xl text-xs transition">
+                Adicionar à Sacola 🛍️
               </button>
             </div>
           </div>
         </div>
       )}
 
-      {/* CHECKOUT */}
-      {isCheckoutOpen && (
-        <div className="fixed inset-0 bg-black/80 flex items-end justify-center z-50">
-          <div className="bg-gray-900 w-full max-w-md rounded-t-2xl p-5 border-t border-gray-800 max-h-[90vh] overflow-y-auto space-y-4">
+      {/* MODAL DA SACOLA DE COMPRAS E CHECKOUT */}
+      {showCartModal && (
+        <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 p-4">
+          <div className="bg-gray-900 border border-gray-800 w-full max-w-sm rounded-3xl p-5 space-y-4 shadow-2xl max-h-[90vh] overflow-y-auto">
             <div className="flex justify-between items-center border-b border-gray-800 pb-2">
-              <h3 className="font-bold text-sm" style={{ color: primaryColor }}>🛍️ Finalizar Pedido</h3>
-              <button onClick={() => setIsCheckoutOpen(false)} className="text-gray-400 font-bold text-sm">✕</button>
+              <h3 className="font-bold text-sm text-orange-400">🛍️ Sua Sacola de Compras</h3>
+              <button onClick={() => setShowCartModal(false)} className="text-gray-400 font-bold text-xs">✕ Fechar</button>
             </div>
 
-            <form onSubmit={handleSendOrder} className="space-y-3">
-              <input type="text" required placeholder="Seu Nome" value={customerName} onChange={(e) => setCustomerName(e.target.value)} className="w-full bg-gray-800 border border-gray-700 p-2.5 rounded-lg text-xs text-white focus:outline-none" />
-              <input type="text" required placeholder="Seu WhatsApp" value={customerPhone} onChange={(e) => setCustomerPhone(e.target.value)} className="w-full bg-gray-800 border border-gray-700 p-2.5 rounded-lg text-xs text-white focus:outline-none" />
+            <div className="space-y-2 max-h-48 overflow-y-auto">
+              {cart.map(item => (
+                <div key={item.cartId} className="bg-gray-950 p-3 rounded-2xl border border-gray-800 text-xs flex justify-between items-center">
+                  <div>
+                    <h4 className="font-bold text-white">{item.quantity}x {item.name}</h4>
+                    <p className="text-[10px] text-gray-400">Tam: <b>{item.size}</b> | Cor: <b>{item.color}</b></p>
+                    {item.customText && <p className="text-[10px] text-orange-300 italic">Estampa: "{item.customText}"</p>}
+                    <span className="text-green-400 font-bold text-[11px]">R$ {(item.price * item.quantity).toFixed(2)}</span>
+                  </div>
 
-              <div className="flex space-x-2">
-                <button type="button" onClick={() => setOrderType('delivery')} style={{ backgroundColor: orderType === 'delivery' ? primaryColor : '' }} className={`flex-1 py-2 rounded-lg text-xs font-bold border ${orderType === 'delivery' ? 'text-white' : 'bg-gray-800 text-gray-400 border-gray-700'}`}>🛵 Delivery</button>
-                <button type="button" onClick={() => setOrderType('pickup')} style={{ backgroundColor: orderType === 'pickup' ? primaryColor : '' }} className={`flex-1 py-2 rounded-lg text-xs font-bold border ${orderType === 'pickup' ? 'text-white' : 'bg-gray-800 text-gray-400 border-gray-700'}`}>🛍️ Retirada</button>
-              </div>
+                  <button onClick={() => handleRemoveFromCart(item.cartId)} className="text-red-400 text-xs font-bold px-2 py-1">
+                    🗑
+                  </button>
+                </div>
+              ))}
+            </div>
 
-              {orderType === 'delivery' && (
-                <>
-                  <select value={selectedNeigh} onChange={(e) => setSelectedNeigh(e.target.value)} className="w-full bg-gray-800 border border-gray-700 p-2.5 rounded-lg text-xs text-white focus:outline-none">
-                    {neighborhoods.map(n => <option key={n.id} value={n.name}>{n.name} (+R$ {Number(n.fee).toFixed(2)})</option>)}
-                  </select>
-                  <input type="text" required placeholder="Endereço e Número" value={address} onChange={(e) => setAddress(e.target.value)} className="w-full bg-gray-800 border border-gray-700 p-2.5 rounded-lg text-xs text-white focus:outline-none" />
-                  <input type="text" placeholder="Ponto de Referência" value={reference} onChange={(e) => setReference(e.target.value)} className="w-full bg-gray-800 border border-gray-700 p-2.5 rounded-lg text-xs text-white focus:outline-none" />
-                </>
-              )}
+            {/* FORMULÁRIO DE ENTREGA */}
+            <form onSubmit={handleCheckout} className="space-y-2.5 pt-2 border-t border-gray-800 text-xs">
+              <h4 className="font-bold text-xs text-gray-300">Dados para Envio Nacional</h4>
+              <input
+                type="text"
+                required
+                placeholder="Seu Nome Completo"
+                value={customerName}
+                onChange={(e) => setCustomerName(e.target.value)}
+                className="w-full bg-gray-950 border border-gray-800 p-2.5 rounded-xl text-white focus:outline-none"
+              />
+              <input
+                type="text"
+                required
+                placeholder="Seu WhatsApp (DDD + Número)"
+                value={customerPhone}
+                onChange={(e) => setCustomerPhone(e.target.value)}
+                className="w-full bg-gray-950 border border-gray-800 p-2.5 rounded-xl text-white focus:outline-none"
+              />
+              <input
+                type="text"
+                required
+                placeholder="Endereço Completo com Número e Bairro"
+                value={customerAddress}
+                onChange={(e) => setCustomerAddress(e.target.value)}
+                className="w-full bg-gray-950 border border-gray-800 p-2.5 rounded-xl text-white focus:outline-none"
+              />
+              <input
+                type="text"
+                placeholder="CEP (para cálculo de envio)"
+                value={customerZip}
+                onChange={(e) => setCustomerZip(e.target.value)}
+                className="w-full bg-gray-950 border border-gray-800 p-2.5 rounded-xl text-white focus:outline-none"
+              />
 
-              <select value={paymentMethod} onChange={(e) => setPaymentMethod(e.target.value)} className="w-full bg-gray-800 border border-gray-700 p-2.5 rounded-lg text-xs text-white focus:outline-none">
-                <option value="PIX">PIX</option>
-                <option value="Cartão na Entrega">Cartão na Entrega</option>
-                <option value="Dinheiro">Dinheiro</option>
-              </select>
-
-              <div className="bg-gray-800 p-3 rounded-lg space-y-1 text-xs">
-                <div className="flex justify-between text-gray-400"><span>Subtotal:</span><span>R$ {subtotal.toFixed(2)}</span></div>
-                <div className="flex justify-between text-gray-400"><span>Taxa Entrega:</span><span>R$ {deliveryFee.toFixed(2)}</span></div>
-                <div className="flex justify-between font-bold text-white text-sm border-t border-gray-700 pt-1"><span>TOTAL:</span><span className="text-green-400">R$ {total.toFixed(2)}</span></div>
-              </div>
-
-              <button type="submit" className="w-full bg-green-600 font-bold py-3 rounded-xl text-xs text-white">Enviar Pedido pelo WhatsApp 🚀</button>
+              <button
+                type="submit"
+                disabled={isSubmitting}
+                className="w-full bg-green-600 hover:bg-green-700 text-white font-bold py-3.5 rounded-2xl text-xs transition shadow-lg mt-2">
+                {isSubmitting ? 'Enviando...' : 'Finalizar Pedido no WhatsApp 🚀'}
+              </button>
             </form>
           </div>
         </div>
