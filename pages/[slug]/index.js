@@ -92,6 +92,8 @@ export default function CatalogoRoupas() {
       neighborhood: customerZip ? `CEP: ${customerZip}` : 'Envio Nacional',
       order_type: 'entrega',
       items: cart,
+      subtotal: totalCart,
+      delivery_fee: 0,
       total: totalCart,
       payment_method: 'PIX / Cartão no WhatsApp',
       status: 'recebido',
