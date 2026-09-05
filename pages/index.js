@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useRouter } from 'next/router';
 import { supabase } from '../lib/supabase';
 
-export default function HomePortalDelivery() {
+export default function HomePortalEcommerce() {
   const router = useRouter();
 
   const [slugInput, setSlugInput] = useState('');
@@ -11,19 +11,17 @@ export default function HomePortalDelivery() {
   const [loading, setLoading] = useState(false);
   const [copied, setCopied] = useState(false);
 
-  // VERIFICA SE JÁ EXISTE SESSÃO SALVA DO DELIVERY
   useEffect(() => {
-    const savedTenant = localStorage.getItem('sinerge_authenticated_delivery_tenant');
+    const savedTenant = localStorage.getItem('sinerge_authenticated_ecommerce_tenant');
     if (savedTenant) {
       try {
         setTenant(JSON.parse(savedTenant));
       } catch (e) {
-        localStorage.removeItem('sinerge_authenticated_delivery_tenant');
+        localStorage.removeItem('sinerge_authenticated_ecommerce_tenant');
       }
     }
   }, []);
 
-  // LOGIN DO RESTAURANTE / ESTABELECIMENTO
   const handleLogin = async (e) => {
     e.preventDefault();
     if (!slugInput || !passwordInput) return alert("Preencha o identificador (Slug) e a Senha!");
@@ -44,40 +42,37 @@ export default function HomePortalDelivery() {
       alert("Identificador da loja ou Senha de Administrador incorretos!");
     } else {
       setTenant(data);
-      localStorage.setItem('sinerge_authenticated_delivery_tenant', JSON.stringify(data));
+      localStorage.setItem('sinerge_authenticated_ecommerce_tenant', JSON.stringify(data));
     }
   };
 
-  // DESLOGAR DA LOJA
   const handleLogout = () => {
-    localStorage.removeItem('sinerge_authenticated_delivery_tenant');
+    localStorage.removeItem('sinerge_authenticated_ecommerce_tenant');
     setTenant(null);
     setSlugInput('');
     setPasswordInput('');
   };
 
-  // COPIAR LINK PÚBLICO DO CARDÁPIO
   const handleCopyPublicLink = () => {
-    const publicUrl = `https://delivery.sinergemkt.com/${tenant.slug}`;
+    const publicUrl = `https://catalogo.sinergemkt.com/${tenant.slug}`;
     navigator.clipboard.writeText(publicUrl);
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
   };
 
-  const publicUrl = tenant ? `https://delivery.sinergemkt.com/${tenant.slug}` : '';
+  const publicUrl = tenant ? `https://catalogo.sinergemkt.com/${tenant.slug}` : '';
 
   return (
     <div className="min-h-screen bg-gray-950 text-white font-sans flex flex-col justify-between p-4 md:p-8">
       
-      {/* CABEÇALHO SUPERIOR */}
       <header className="max-w-5xl mx-auto w-full flex justify-between items-center py-4 border-b border-gray-800">
         <div className="flex items-center space-x-3">
           <div className="w-9 h-9 rounded-xl bg-orange-500 flex items-center justify-center font-bold text-lg text-white shadow-lg shadow-orange-500/20">
-            🍔
+            👕
           </div>
           <div>
-            <h1 className="font-bold text-base text-white leading-tight">Sinerge Delivery</h1>
-            <p className="text-[11px] text-gray-400">Portal do Restaurante & Cardápio SaaS</p>
+            <h1 className="font-bold text-base text-white leading-tight">Sinerge Catálogo</h1>
+            <p className="text-[11px] text-gray-400">Portal de Vestuário & E-Commerce SaaS</p>
           </div>
         </div>
 
@@ -90,19 +85,16 @@ export default function HomePortalDelivery() {
         )}
       </header>
 
-      {/* CONTEÚDO PRINCIPAL */}
       <main className="max-w-5xl mx-auto w-full my-auto py-8">
-        
         {!tenant ? (
-          /* TELA 1: LOGIN DO DELIVERY */
           <div className="max-w-md mx-auto bg-gray-900 border border-gray-800 rounded-3xl p-6 md:p-8 space-y-6 shadow-2xl relative overflow-hidden">
-            <div className="absolute top-0 left-0 right-0 h-1.5 bg-gradient-to-r from-orange-500 via-amber-500 to-orange-500"></div>
+            <div className="absolute top-0 left-0 right-0 h-1.5 bg-gradient-to-r from-orange-500 via-purple-500 to-orange-500"></div>
 
             <div className="text-center space-y-2 pt-2">
               <div className="w-12 h-12 bg-orange-500/10 border border-orange-500/30 text-orange-400 rounded-2xl flex items-center justify-center text-xl mx-auto">
                 🔐
               </div>
-              <h2 className="text-xl font-bold text-white">Acessar Meu Delivery</h2>
+              <h2 className="text-xl font-bold text-white">Acessar Minha Loja</h2>
               <p className="text-xs text-gray-400">Digite seu identificador e senha de administrador para entrar.</p>
             </div>
 
@@ -112,7 +104,7 @@ export default function HomePortalDelivery() {
                 <input
                   type="text"
                   required
-                  placeholder="Ex: hamburgueria"
+                  placeholder="Ex: vestuario"
                   value={slugInput}
                   onChange={(e) => setSlugInput(e.target.value)}
                   className="w-full bg-gray-950 border border-gray-800 p-3.5 rounded-xl text-white focus:outline-none focus:border-orange-500 transition text-sm"
@@ -135,19 +127,16 @@ export default function HomePortalDelivery() {
                 type="submit"
                 disabled={loading}
                 className="w-full bg-orange-500 hover:bg-orange-600 text-white font-bold py-4 rounded-xl text-xs transition shadow-lg shadow-orange-500/20">
-                {loading ? 'Acessando Sistema...' : 'Entrar no Meu Delivery 🚀'}
+                {loading ? 'Acessando Sistema...' : 'Entrar na Minha Loja 🚀'}
               </button>
             </form>
           </div>
         ) : (
-          /* TELA 2: PORTAL DO DELIVERY (AUTENTICADO) */
           <div className="space-y-6">
-            
-            {/* HERO BANNER DA LOJA */}
             <div className="bg-gray-900 border border-gray-800 rounded-3xl p-6 flex flex-col md:flex-row justify-between items-start md:items-center gap-4 relative overflow-hidden shadow-xl">
               <div className="flex items-center space-x-4">
                 <img
-                  src={tenant.logo_url || 'https://images.unsplash.com/photo-1555396273-367ea4eb4db5?w=150&auto=format&fit=crop&q=80'}
+                  src={tenant.logo_url || 'https://images.unsplash.com/photo-1521572267360-ee0c2909d518?w=150&auto=format&fit=crop&q=80'}
                   alt={tenant.name}
                   className="w-16 h-16 rounded-2xl object-cover border-2 border-orange-500/50 bg-gray-800"
                 />
@@ -158,7 +147,7 @@ export default function HomePortalDelivery() {
                       🟢 Autenticado
                     </span>
                   </div>
-                  <p className="text-xs text-gray-400 mt-0.5">Painel de controle de pedidos e cardápio digital.</p>
+                  <p className="text-xs text-gray-400 mt-0.5">Painel de controle de catálogo e pedidos de confecção.</p>
                 </div>
               </div>
 
@@ -166,20 +155,17 @@ export default function HomePortalDelivery() {
                 <button
                   onClick={() => router.push(`/${tenant.slug}/admin`)}
                   className="bg-orange-500 hover:bg-orange-600 text-white font-bold px-5 py-3 rounded-xl text-xs transition shadow-lg shadow-orange-500/20 w-full md:w-auto text-center">
-                  ⚙️ Gestão de Cardápio
+                  ⚙️ Gestão de Catálogo
                 </button>
               </div>
             </div>
 
-            {/* CARDS DE MÓDULOS DE TRABALHO */}
             <div>
               <h3 className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-3">
                 📌 O que você deseja acessar agora?
               </h3>
 
               <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                
-                {/* CARD 1: PAINEL ADMIN */}
                 <div
                   onClick={() => router.push(`/${tenant.slug}/admin`)}
                   className="bg-gray-900 border border-gray-800 hover:border-orange-500/50 p-5 rounded-3xl space-y-3 cursor-pointer transition group shadow-lg">
@@ -188,50 +174,46 @@ export default function HomePortalDelivery() {
                   </div>
                   <div>
                     <h4 className="font-bold text-sm text-white group-hover:text-orange-400 transition">Painel Administrativo</h4>
-                    <p className="text-xs text-gray-400 mt-1">Gerencie produtos do cardápio, adicionais, bairros, taxas e horários.</p>
+                    <p className="text-xs text-gray-400 mt-1">Gerencie catálogo de camisas, peças, preços e categorias.</p>
                   </div>
                   <span className="text-xs font-bold text-orange-400 block pt-2">Acessar Admin ➔</span>
                 </div>
 
-                {/* CARD 2: COZINHA & PEDIDOS */}
                 <div
-                  onClick={() => router.push(`/${tenant.slug}/cozinha`)}
+                  onClick={() => router.push(`/${tenant.slug}/producao`)}
                   className="bg-gray-900 border border-gray-800 hover:border-blue-500/50 p-5 rounded-3xl space-y-3 cursor-pointer transition group shadow-lg">
                   <div className="w-10 h-10 rounded-2xl bg-blue-500/10 border border-blue-500/30 text-blue-400 flex items-center justify-center text-lg">
-                    🍳
+                    👕
                   </div>
                   <div>
-                    <h4 className="font-bold text-sm text-white group-hover:text-blue-400 transition">Cozinha & Pedidos</h4>
-                    <p className="text-xs text-gray-400 mt-1">Acompanhe novos pedidos em tempo real, imprima comandas e altere o status[cite: 2].</p>
+                    <h4 className="font-bold text-sm text-white group-hover:text-blue-400 transition">Fila de Produção</h4>
+                    <p className="text-xs text-gray-400 mt-1">Acompanhe encomendas recebidas, etapa de estamparia e envio nos Correios.</p>
                   </div>
-                  <span className="text-xs font-bold text-blue-400 block pt-2">Abrir Cozinha ➔</span>
+                  <span className="text-xs font-bold text-blue-400 block pt-2">Abrir Produção ➔</span>
                 </div>
 
-                {/* CARD 3: CARDÁPIO DIGITAL PÚBLICO */}
                 <div
                   onClick={() => window.open(publicUrl, '_blank')}
                   className="bg-gray-900 border border-gray-800 hover:border-emerald-500/50 p-5 rounded-3xl space-y-3 cursor-pointer transition group shadow-lg">
                   <div className="w-10 h-10 rounded-2xl bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 flex items-center justify-center text-lg">
-                    🍔
+                    🛍️
                   </div>
                   <div>
-                    <h4 className="font-bold text-sm text-white group-hover:text-emerald-400 transition">Cardápio do Cliente</h4>
-                    <p className="text-xs text-gray-400 mt-1">Veja exatamente a tela de pedidos e carrinho como os seus clientes enxergam.</p>
+                    <h4 className="font-bold text-sm text-white group-hover:text-emerald-400 transition">Catálogo Público</h4>
+                    <p className="text-xs text-gray-400 mt-1">Veja a tela onde seus clientes escolhem tamanhos, cores e encomendam.</p>
                   </div>
-                  <span className="text-xs font-bold text-emerald-400 block pt-2">Visualizar Cardápio ➔</span>
+                  <span className="text-xs font-bold text-emerald-400 block pt-2">Visualizar Catálogo ➔</span>
                 </div>
-
               </div>
             </div>
 
-            {/* COMPARTILHAMENTO DO LINK DO CARDÁPIO */}
             <div className="bg-gradient-to-r from-gray-900 via-gray-900 to-gray-950 border border-gray-800 rounded-3xl p-6 space-y-3 shadow-xl">
               <div className="flex justify-between items-center">
                 <div>
                   <h4 className="font-bold text-sm text-white flex items-center space-x-1">
-                    <span>🔗 Link do Seu Cardápio Digital</span>
+                    <span>🔗 Link da Sua Loja / Catálogo Digital</span>
                   </h4>
-                  <p className="text-xs text-gray-400">Envie este link nas redes sociais ou no WhatsApp da sua loja.</p>
+                  <p className="text-xs text-gray-400">Divulgue no Instagram ou envie direto aos clientes.</p>
                 </div>
               </div>
 
@@ -253,7 +235,7 @@ export default function HomePortalDelivery() {
                   </button>
 
                   <a
-                    href={`https://wa.me/?text=${encodeURIComponent(`Faça seu pedido diretamente no nosso cardápio digital: ${publicUrl}`)}`}
+                    href={`https://wa.me/?text=${encodeURIComponent(`Confira nosso catálogo de peças personalizadas: ${publicUrl}`)}`}
                     target="_blank"
                     rel="noopener noreferrer"
                     className="bg-green-600/20 hover:bg-green-600/30 text-green-400 border border-green-500/30 px-4 py-3 rounded-xl text-xs font-bold transition whitespace-nowrap text-center">
@@ -262,17 +244,13 @@ export default function HomePortalDelivery() {
                 </div>
               </div>
             </div>
-
           </div>
         )}
-
       </main>
 
-      {/* RODAPÉ */}
       <footer className="max-w-5xl mx-auto w-full text-center py-4 border-t border-gray-800 text-xs text-gray-500">
-        <p>© 2026 Sinerge Delivery — Plataforma SaaS Multi-Tenant.</p>
+        <p>© 2026 Sinerge Catálogo — Plataforma SaaS Multi-Tenant.</p>
       </footer>
-
     </div>
   );
 }
