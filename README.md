@@ -1,2 +1,2 @@
-# ecommerce-saas-platform
-lojistas
+# elivery-saas-platform
+Plataforma Delivery
