@@ -16,11 +16,10 @@ export default function CatalogoRoupas() {
   const [cart, setCart] = useState([]);
   const [showCartModal, setShowCartModal] = useState(false);
 
-  // MODAL DE DETALHES DO PRODUTO (TAMANHO, COR E PERSONALIZAÇÃO)
+  // MODAL DE DETALHES DO PRODUTO (TAMANHO E COR)
   const [activeProduct, setActiveProduct] = useState(null);
   const [selectedSize, setSelectedSize] = useState('G');
   const [selectedColor, setSelectedColor] = useState('Preto');
-  const [customText, setCustomText] = useState(''); // Nome/Número para estampar
   const [productQuantity, setProductQuantity] = useState(1);
 
   // DADOS DE ENTREGA DO CLIENTE
@@ -65,13 +64,11 @@ export default function CatalogoRoupas() {
       quantity: productQuantity,
       size: selectedSize,
       color: selectedColor,
-      customText: customText.trim(),
-      imageUrl: activeProduct.image_url
+      imageUrl: activeProduct.image_url || activeProduct.image
     };
 
     setCart([...cart, cartItem]);
     setActiveProduct(null);
-    setCustomText('');
     setProductQuantity(1);
   };
 
@@ -111,7 +108,7 @@ export default function CatalogoRoupas() {
       return alert("Erro ao enviar pedido: " + error.message);
     }
 
-    // FORMATAR MENSAGEM DO WHATSAPP COM OS DETALHES DE PERSONALIZAÇÃO
+    // FORMATAR MENSAGEM DO WHATSAPP
     let msg = `*NOVO PEDIDO #${createdOrder.id} - ${tenant.name.toUpperCase()}*\n\n`;
     msg += `*Cliente:* ${customerName}\n*WhatsApp:* ${customerPhone}\n`;
     msg += `*Endereço:* ${customerAddress}\n`;
@@ -122,9 +119,6 @@ export default function CatalogoRoupas() {
     cart.forEach((item, idx) => {
       msg += `\n${idx + 1}. *${item.quantity}x ${item.name}* - R$ ${(item.price * item.quantity).toFixed(2)}\n`;
       msg += `   • *Tamanho:* ${item.size} | *Cor:* ${item.color}\n`;
-      if (item.customText) {
-        msg += `   • ✏️ *Estampa/Nome:* "${item.customText}"\n`;
-      }
     });
 
     msg += `\n*TOTAL DO PEDIDO:* *R$ ${totalCart.toFixed(2)}*`;
@@ -134,7 +128,7 @@ export default function CatalogoRoupas() {
 
     setCart([]);
     setShowCartModal(false);
-    alert("Pedido enviado com sucesso para a produção!");
+    alert("Pedido enviado com sucesso!");
   };
 
   if (loading) return <div className="min-h-screen bg-gray-950 text-white flex items-center justify-center font-sans"><p className="text-xs text-gray-400">Carregando Loja...</p></div>;
@@ -173,7 +167,7 @@ export default function CatalogoRoupas() {
           />
           <div className="pt-5">
             <h1 className="font-bold text-lg leading-tight" style={{ color: textColor }}>{tenant.name}</h1>
-            <p className="text-[11px] opacity-70" style={{ color: textColor }}>👕 Camisas & Vestuário Personalizado</p>
+            <p className="text-[11px] opacity-70" style={{ color: textColor }}>👕 Camisas & Vestuário</p>
           </div>
         </div>
       </div>
@@ -223,7 +217,7 @@ export default function CatalogoRoupas() {
               
               <div className="space-y-2">
                 <img
-                  src={prod.image_url || 'https://images.unsplash.com/photo-1521572267360-ee0c2909d518?w=300&auto=format&fit=crop&q=80'}
+                  src={prod.image_url || prod.image || 'https://images.unsplash.com/photo-1521572267360-ee0c2909d518?w=300&auto=format&fit=crop&q=80'}
                   alt={prod.name}
                   className="w-full h-36 object-cover rounded-xl bg-black/20"
                 />
@@ -257,7 +251,7 @@ export default function CatalogoRoupas() {
         </div>
       )}
 
-      {/* MODAL DE OPÇÕES DO PRODUTO (TAMANHO, COR E PERSONALIZAÇÃO) */}
+      {/* MODAL DE DETALHES DO PRODUTO (TAMANHO E COR) */}
       {activeProduct && (
         <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 p-4 backdrop-blur-sm">
           <div 
@@ -270,7 +264,7 @@ export default function CatalogoRoupas() {
             </div>
 
             <img
-              src={activeProduct.image_url || 'https://images.unsplash.com/photo-1521572267360-ee0c2909d518?w=300&auto=format&fit=crop&q=80'}
+              src={activeProduct.image_url || activeProduct.image || 'https://images.unsplash.com/photo-1521572267360-ee0c2909d518?w=300&auto=format&fit=crop&q=80'}
               alt={activeProduct.name}
               className="w-full h-44 object-cover rounded-2xl bg-black/20"
             />
@@ -319,19 +313,6 @@ export default function CatalogoRoupas() {
               </div>
             </div>
 
-            {/* CAMPO DE PERSONALIZAÇÃO OPCIONAL */}
-            <div className="space-y-1">
-              <label className="text-[11px] font-bold block opacity-90">3. Nome/Número para Estampar (Opcional):</label>
-              <input
-                type="text"
-                placeholder="Ex: SILVA - #10 (ou deixe em branco)"
-                value={customText}
-                onChange={(e) => setCustomText(e.target.value)}
-                style={{ backgroundColor: secondaryColor, color: textColor, borderColor: 'rgba(255,255,255,0.15)' }}
-                className="w-full border p-2.5 rounded-xl text-xs focus:outline-none"
-              />
-            </div>
-
             <div className="flex justify-between items-center pt-2">
               <span className="font-bold text-sm text-green-400">R$ {(Number(activeProduct.price) * productQuantity).toFixed(2)}</span>
               <button
@@ -367,7 +348,6 @@ export default function CatalogoRoupas() {
                   <div>
                     <h4 className="font-bold">{item.quantity}x {item.name}</h4>
                     <p className="text-[10px] opacity-70">Tam: <b>{item.size}</b> | Cor: <b>{item.color}</b></p>
-                    {item.customText && <p className="text-[10px] italic" style={{ color: primaryColor }}>Estampa: "{item.customText}"</p>}
                     <span className="text-green-400 font-bold text-[11px]">R$ {(item.price * item.quantity).toFixed(2)}</span>
                   </div>
 
