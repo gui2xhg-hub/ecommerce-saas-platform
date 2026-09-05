@@ -16,10 +16,9 @@ export default function CatalogoRoupas() {
   const [cart, setCart] = useState([]);
   const [showCartModal, setShowCartModal] = useState(false);
 
-  // MODAL DE DETALHES DO PRODUTO (TAMANHO E COR)
+  // MODAL DE DETALHES DO PRODUTO (TAMANHO E QUANTIDADE)
   const [activeProduct, setActiveProduct] = useState(null);
   const [selectedSize, setSelectedSize] = useState('G');
-  const [selectedColor, setSelectedColor] = useState('Preto');
   const [productQuantity, setProductQuantity] = useState(1);
 
   // DADOS DE ENTREGA DO CLIENTE
@@ -57,13 +56,12 @@ export default function CatalogoRoupas() {
     if (!activeProduct) return;
 
     const cartItem = {
-      cartId: `${activeProduct.id}-${selectedSize}-${selectedColor}-${Date.now()}`,
+      cartId: `${activeProduct.id}-${selectedSize}-${Date.now()}`,
       productId: activeProduct.id,
       name: activeProduct.name,
       price: Number(activeProduct.price || 0),
       quantity: productQuantity,
       size: selectedSize,
-      color: selectedColor,
       imageUrl: activeProduct.image_url || activeProduct.image
     };
 
@@ -118,7 +116,7 @@ export default function CatalogoRoupas() {
 
     cart.forEach((item, idx) => {
       msg += `\n${idx + 1}. *${item.quantity}x ${item.name}* - R$ ${(item.price * item.quantity).toFixed(2)}\n`;
-      msg += `   • *Tamanho:* ${item.size} | *Cor:* ${item.color}\n`;
+      msg += `   • *Tamanho:* ${item.size}\n`;
     });
 
     msg += `\n*TOTAL DO PEDIDO:* *R$ ${totalCart.toFixed(2)}*`;
@@ -209,7 +207,6 @@ export default function CatalogoRoupas() {
               onClick={() => {
                 setActiveProduct(prod);
                 setSelectedSize('G');
-                setSelectedColor('Preto');
                 setProductQuantity(1);
               }}
               style={{ backgroundColor: cardBgColor, borderColor: 'rgba(255,255,255,0.1)' }}
@@ -229,7 +226,7 @@ export default function CatalogoRoupas() {
                 <span 
                   style={{ backgroundColor: `${primaryColor}20`, color: primaryColor, borderColor: `${primaryColor}40` }}
                   className="text-[10px] font-bold px-2 py-0.5 rounded-lg border">
-                  + Opções
+                  Ver Peça
                 </span>
               </div>
             </div>
@@ -251,7 +248,7 @@ export default function CatalogoRoupas() {
         </div>
       )}
 
-      {/* MODAL DE DETALHES DO PRODUTO (TAMANHO E COR) */}
+      {/* MODAL DE DETALHES DO PRODUTO (TAMANHO E QUANTIDADE) */}
       {activeProduct && (
         <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 p-4 backdrop-blur-sm">
           <div 
@@ -292,28 +289,27 @@ export default function CatalogoRoupas() {
               </div>
             </div>
 
-            {/* SELEÇÃO DE COR */}
+            {/* SELEÇÃO DE QUANTIDADE */}
             <div className="space-y-1.5">
-              <label className="text-[11px] font-bold block opacity-90">2. Selecione a Cor:</label>
-              <div className="grid grid-cols-3 gap-2">
-                {['Preto', 'Branco', 'Mescla/Cinza', 'Marrom', 'Bege', 'Vermelho'].map(color => (
-                  <button
-                    key={color}
-                    type="button"
-                    onClick={() => setSelectedColor(color)}
-                    style={
-                      selectedColor === color 
-                        ? { backgroundColor: `${primaryColor}30`, borderColor: primaryColor, color: primaryColor } 
-                        : { backgroundColor: 'rgba(255,255,255,0.05)', borderColor: 'rgba(255,255,255,0.1)', color: textColor }
-                    }
-                    className="py-1.5 px-2 rounded-xl font-bold text-[11px] border transition">
-                    {color}
-                  </button>
-                ))}
+              <label className="text-[11px] font-bold block opacity-90">2. Quantidade:</label>
+              <div className="flex items-center space-x-3 bg-black/20 p-1.5 rounded-xl border border-white/10 w-max">
+                <button
+                  type="button"
+                  onClick={() => setProductQuantity(Math.max(1, productQuantity - 1))}
+                  className="w-8 h-8 rounded-lg bg-white/10 font-bold text-sm flex items-center justify-center hover:bg-white/20 transition">
+                  -
+                </button>
+                <span className="font-bold text-sm px-2">{productQuantity}</span>
+                <button
+                  type="button"
+                  onClick={() => setProductQuantity(productQuantity + 1)}
+                  className="w-8 h-8 rounded-lg bg-white/10 font-bold text-sm flex items-center justify-center hover:bg-white/20 transition">
+                  +
+                </button>
               </div>
             </div>
 
-            <div className="flex justify-between items-center pt-2">
+            <div className="flex justify-between items-center pt-2 border-t border-white/10">
               <span className="font-bold text-sm text-green-400">R$ {(Number(activeProduct.price) * productQuantity).toFixed(2)}</span>
               <button
                 type="button"
@@ -347,7 +343,7 @@ export default function CatalogoRoupas() {
                   className="p-3 rounded-2xl border text-xs flex justify-between items-center">
                   <div>
                     <h4 className="font-bold">{item.quantity}x {item.name}</h4>
-                    <p className="text-[10px] opacity-70">Tam: <b>{item.size}</b> | Cor: <b>{item.color}</b></p>
+                    <p className="text-[10px] opacity-70">Tamanho: <b>{item.size}</b></p>
                     <span className="text-green-400 font-bold text-[11px]">R$ {(item.price * item.quantity).toFixed(2)}</span>
                   </div>
 
