@@ -12,6 +12,9 @@ export default function CatalogoRoupas() {
   const [shippingOptions, setShippingOptions] = useState([]);
   const [loading, setLoading] = useState(true);
 
+  // MELHORIA 1: BUSCA RÁPIDA
+  const [searchQuery, setSearchQuery] = useState('');
+
   // ESTADOS DO CARRINHO & PRODUTO SELECIONADO
   const [selectedCategory, setSelectedCategory] = useState('ALL');
   const [cart, setCart] = useState([]);
@@ -34,6 +37,7 @@ export default function CatalogoRoupas() {
   const [customerZip, setCustomerZip] = useState('');
   const [selectedShipping, setSelectedShipping] = useState(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [pixCopied, setPixCopied] = useState(false);
 
   useEffect(() => {
     if (router.isReady && slug) {
@@ -54,10 +58,12 @@ export default function CatalogoRoupas() {
 
       if (cData) setCategories(cData);
       if (pData) setProducts(pData);
-      if (nData) {
-        setShippingOptions(nData);
-        if (nData.length > 0) setSelectedShipping(nData[0]);
-      }
+
+      // Opção Padrão de Retirada + Opções do Banco
+      const defaultOption = { id: 'local', name: '🏬 Retirada na Loja / Combinar Entrega Local', fee: 0 };
+      const options = nData ? [defaultOption, ...nData] : [defaultOption];
+      setShippingOptions(options);
+      setSelectedShipping(defaultOption);
     }
     setLoading(false);
   };
@@ -82,6 +88,20 @@ export default function CatalogoRoupas() {
 
   const handleRemoveFromCart = (cartId) => {
     setCart(cart.filter(item => item.cartId !== cartId));
+  };
+
+  // MELHORIA 2: COMPARTILHAR PRODUTO NO WHATSAPP
+  const handleShareProduct = (product) => {
+    const text = `Olha essa peça na ${tenant.name}: *${product.name}* por R$ ${Number(product.price).toFixed(2)}!\nVeja no site: ${window.location.href}`;
+    window.open(`https://api.whatsapp.com/send?text=${encodeURIComponent(text)}`, '_blank');
+  };
+
+  // MELHORIA 3: COPIAR CHAVE PIX
+  const handleCopyPix = () => {
+    const key = tenant?.pix_key || tenant?.whatsapp || 'Chave cadastrada no atendimento';
+    navigator.clipboard.writeText(key);
+    setPixCopied(true);
+    setTimeout(() => setPixCopied(false), 3000);
   };
 
   // CÁLCULO DOS VALORES
@@ -124,7 +144,7 @@ export default function CatalogoRoupas() {
     }
   };
 
-  // FINALIZAR PEDIDO NO WHATSAPP
+  // FINALIZAR PEDIDO
   const handleCheckout = async (e) => {
     e.preventDefault();
     if (cart.length === 0) return alert("Seu carrinho está vazio!");
@@ -161,7 +181,7 @@ export default function CatalogoRoupas() {
     msg += `*Cliente:* ${customerName}\n*WhatsApp:* ${customerPhone}\n`;
     msg += `*Endereço:* ${customerAddress}\n`;
     if (customerZip) msg += `*CEP:* ${customerZip}\n`;
-    if (selectedShipping) msg += `*Frete/Estado:* ${selectedShipping.name} (R$ ${shippingFee.toFixed(2)})\n\n`;
+    if (selectedShipping) msg += `*Opção de Envio:* ${selectedShipping.name}\n\n`;
     msg += `*ITENS SOLICITADOS:*\n`;
 
     cart.forEach((item, idx) => {
@@ -195,9 +215,12 @@ export default function CatalogoRoupas() {
   const cardBgColor = tenant.card_bg_color || '#111827';
   const textColor = tenant.text_color || '#FFFFFF';
 
-  const filteredProducts = selectedCategory === 'ALL' 
-    ? products 
-    : products.filter(p => String(p.category_id) === String(selectedCategory));
+  // FILTRAGEM POR CATEGORIA E BUSCA
+  const filteredProducts = products.filter(p => {
+    const matchesCategory = selectedCategory === 'ALL' || String(p.category_id) === String(selectedCategory);
+    const matchesSearch = p.name.toLowerCase().includes(searchQuery.toLowerCase());
+    return matchesCategory && matchesSearch;
+  });
 
   return (
     <div className="min-h-screen font-sans pb-24 max-w-md mx-auto transition-colors duration-300" style={{ backgroundColor: secondaryColor, color: textColor }}>
@@ -214,8 +237,20 @@ export default function CatalogoRoupas() {
         </div>
       </div>
 
-      {/* CATEGORIAS DA LOJA */}
-      <div className="mt-10 px-4 space-y-5">
+      <div className="mt-10 px-4 space-y-4">
+        {/* MELHORIA 1: BARRA DE BUSCA RÁPIDA */}
+        <div className="relative">
+          <input
+            type="text"
+            placeholder="🔍 Buscar peças pelo nome..."
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            style={{ backgroundColor: cardBgColor, color: textColor, borderColor: 'rgba(255,255,255,0.1)' }}
+            className="w-full border p-3 rounded-2xl text-xs focus:outline-none shadow-sm"
+          />
+        </div>
+
+        {/* CATEGORIAS DA LOJA */}
         <div className="flex space-x-2 overflow-x-auto pb-1 scrollbar-none">
           <button onClick={() => setSelectedCategory('ALL')} style={selectedCategory === 'ALL' ? { backgroundColor: primaryColor, color: buttonTextColor, borderColor: primaryColor } : { backgroundColor: cardBgColor, color: textColor, borderColor: 'rgba(255,255,255,0.1)' }} className="px-3.5 py-2 rounded-xl text-xs font-bold whitespace-nowrap transition border shadow-sm">
             Todas as Peças
@@ -230,14 +265,17 @@ export default function CatalogoRoupas() {
         {/* CATÁLOGO DE PRODUTOS */}
         <div className="grid grid-cols-2 gap-3">
           {filteredProducts.map(prod => (
-            <div key={prod.id} onClick={() => { setActiveProduct(prod); setSelectedSize('G'); setProductQuantity(1); }} style={{ backgroundColor: cardBgColor, borderColor: 'rgba(255,255,255,0.1)' }} className="border rounded-2xl p-2.5 space-y-2 cursor-pointer hover:border-white/30 transition flex flex-col justify-between shadow-lg">
-              <div className="space-y-2">
+            <div key={prod.id} style={{ backgroundColor: cardBgColor, borderColor: 'rgba(255,255,255,0.1)' }} className="border rounded-2xl p-2.5 space-y-2 flex flex-col justify-between shadow-lg relative">
+              <div onClick={() => { setActiveProduct(prod); setSelectedSize('G'); setProductQuantity(1); }} className="cursor-pointer space-y-2">
                 <img src={prod.image_url || prod.image || 'https://images.unsplash.com/photo-1521572267360-ee0c2909d518?w=300&auto=format&fit=crop&q=80'} alt={prod.name} className="w-full h-36 object-cover rounded-xl bg-black/20" />
                 <h3 className="font-bold text-xs line-clamp-2" style={{ color: textColor }}>{prod.name}</h3>
               </div>
+
               <div className="flex justify-between items-center pt-2 border-t border-white/10">
                 <span className="font-bold text-xs" style={{ color: primaryColor }}>R$ {Number(prod.price).toFixed(2)}</span>
-                <span style={{ backgroundColor: `${primaryColor}20`, color: primaryColor, borderColor: `${primaryColor}40` }} className="text-[10px] font-bold px-2 py-0.5 rounded-lg border">Ver Peça</span>
+                <button onClick={() => { setActiveProduct(prod); setSelectedSize('G'); setProductQuantity(1); }} style={{ backgroundColor: `${primaryColor}20`, color: primaryColor, borderColor: `${primaryColor}40` }} className="text-[10px] font-bold px-2 py-1 rounded-lg border">
+                  Ver Peça
+                </button>
               </div>
             </div>
           ))}
@@ -263,8 +301,16 @@ export default function CatalogoRoupas() {
               <h3 className="font-bold text-sm">{activeProduct.name}</h3>
               <button onClick={() => setActiveProduct(null)} className="font-bold text-xs opacity-60 hover:opacity-100">✕ Fechar</button>
             </div>
+
             <img src={activeProduct.image_url || activeProduct.image || 'https://images.unsplash.com/photo-1521572267360-ee0c2909d518?w=300&auto=format&fit=crop&q=80'} alt={activeProduct.name} className="w-full h-44 object-cover rounded-2xl bg-black/20" />
+
+            {/* MELHORIA 2: BOTÃO COMPARTILHAR */}
+            <button onClick={() => handleShareProduct(activeProduct)} className="w-full bg-green-500/10 hover:bg-green-500/20 text-green-400 border border-green-500/30 font-bold py-2 rounded-xl text-xs flex items-center justify-center space-x-1.5 transition">
+              <span>📲 Compartilhar no WhatsApp</span>
+            </button>
+
             <p className="text-xs opacity-70">{activeProduct.description || 'Algodão 100% penteado de altíssima qualidade.'}</p>
+
             <div className="space-y-1.5">
               <label className="text-[11px] font-bold block opacity-90">1. Selecione o Tamanho:</label>
               <div className="flex space-x-2">
@@ -275,6 +321,7 @@ export default function CatalogoRoupas() {
                 ))}
               </div>
             </div>
+
             <div className="space-y-1.5">
               <label className="text-[11px] font-bold block opacity-90">2. Quantidade:</label>
               <div className="flex items-center space-x-3 bg-black/20 p-1.5 rounded-xl border border-white/10 w-max">
@@ -283,6 +330,7 @@ export default function CatalogoRoupas() {
                 <button type="button" onClick={() => setProductQuantity(productQuantity + 1)} className="w-8 h-8 rounded-lg bg-white/10 font-bold text-sm flex items-center justify-center hover:bg-white/20 transition">+</button>
               </div>
             </div>
+
             <div className="flex justify-between items-center pt-2 border-t border-white/10">
               <span className="font-bold text-sm text-green-400">R$ {(Number(activeProduct.price) * productQuantity).toFixed(2)}</span>
               <button type="button" onClick={handleAddToCart} style={{ backgroundColor: primaryColor, color: buttonTextColor }} className="font-bold px-5 py-2.5 rounded-xl text-xs transition shadow-lg">Adicionar à Sacola 🛍️</button>
@@ -313,6 +361,15 @@ export default function CatalogoRoupas() {
               ))}
             </div>
 
+            {/* MELHORIA 3: CHAVE PIX MANUAL COM CÓPIA */}
+            <div className="bg-green-500/10 border border-green-500/30 p-3 rounded-2xl space-y-1.5 text-xs">
+              <span className="font-bold text-green-400 block text-[11px]">⚡ Pagamento via PIX Direto:</span>
+              <p className="text-[10px] opacity-80">Chave PIX da loja: <b>{tenant?.pix_key || tenant?.whatsapp || 'Cadastrada no atendimento'}</b></p>
+              <button type="button" onClick={handleCopyPix} className="w-full bg-green-600 hover:bg-green-700 text-white font-bold py-1.5 rounded-xl text-[11px] transition">
+                {pixCopied ? '✓ Chave PIX Copiada!' : '📋 Copiar Chave PIX'}
+              </button>
+            </div>
+
             {/* SEÇÃO DE CUPOM DE DESCONTO */}
             <div className="pt-2 border-t border-white/10 space-y-1.5">
               <label className="text-[11px] font-bold block opacity-90">🎟️ Cupom de Desconto:</label>
@@ -325,11 +382,7 @@ export default function CatalogoRoupas() {
                   style={{ backgroundColor: secondaryColor, color: textColor, borderColor: 'rgba(255,255,255,0.15)' }}
                   className="flex-1 border p-2 rounded-xl text-xs uppercase focus:outline-none"
                 />
-                <button
-                  type="button"
-                  onClick={handleApplyCoupon}
-                  style={{ backgroundColor: primaryColor, color: buttonTextColor }}
-                  className="px-3.5 py-2 rounded-xl text-xs font-bold">
+                <button type="button" onClick={handleApplyCoupon} style={{ backgroundColor: primaryColor, color: buttonTextColor }} className="px-3.5 py-2 rounded-xl text-xs font-bold">
                   Aplicar
                 </button>
               </div>
