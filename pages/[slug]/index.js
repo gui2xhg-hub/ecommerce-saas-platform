@@ -140,22 +140,40 @@ export default function CatalogoRoupas() {
   if (loading) return <div className="min-h-screen bg-gray-950 text-white flex items-center justify-center font-sans"><p className="text-xs text-gray-400">Carregando Loja...</p></div>;
   if (!tenant) return <div className="min-h-screen bg-gray-950 text-white flex items-center justify-center font-sans"><h1 className="text-xl font-bold text-orange-500">Loja não encontrada</h1></div>;
 
+  // CORES DINÂMICAS DO TEMA
+  const primaryColor = tenant.primary_color || '#FF8C00';
+  const buttonTextColor = tenant.button_text_color || '#FFFFFF';
+  const secondaryColor = tenant.secondary_color || '#090D16';
+  const cardBgColor = tenant.card_bg_color || '#111827';
+  const textColor = tenant.text_color || '#FFFFFF';
+
   const filteredProducts = selectedCategory === 'ALL' 
     ? products 
     : products.filter(p => String(p.category_id) === String(selectedCategory));
 
   return (
-    <div className="min-h-screen bg-gray-950 text-white font-sans pb-24 max-w-md mx-auto">
+    <div 
+      className="min-h-screen font-sans pb-24 max-w-md mx-auto transition-colors duration-300"
+      style={{ backgroundColor: secondaryColor, color: textColor }}>
       
       {/* CAPA & BANNER DA LOJA */}
-      <div className="relative h-40 bg-gray-900 border-b border-gray-800">
-        <img src={tenant.banner_url || 'https://images.unsplash.com/photo-1441986300917-64674bd600d8?w=800&auto=format&fit=crop&q=80'} alt="Capa" className="w-full h-full object-cover opacity-40" />
+      <div className="relative h-40 bg-black/30 border-b border-white/10">
+        <img 
+          src={tenant.banner_url || 'https://images.unsplash.com/photo-1441986300917-64674bd600d8?w=800&auto=format&fit=crop&q=80'} 
+          alt="Capa" 
+          className="w-full h-full object-cover opacity-40" 
+        />
         
         <div className="absolute -bottom-6 left-4 flex items-center space-x-3">
-          <img src={tenant.logo_url || 'https://images.unsplash.com/photo-1521572267360-ee0c2909d518?w=150&auto=format&fit=crop&q=80'} alt="Logo" className="w-16 h-16 rounded-2xl border-2 border-gray-950 object-cover bg-gray-800 shadow-xl" />
+          <img 
+            src={tenant.logo_url || 'https://images.unsplash.com/photo-1521572267360-ee0c2909d518?w=150&auto=format&fit=crop&q=80'} 
+            alt="Logo" 
+            className="w-16 h-16 rounded-2xl border-2 border-white/20 object-cover shadow-xl"
+            style={{ backgroundColor: cardBgColor }} 
+          />
           <div className="pt-5">
-            <h1 className="font-bold text-lg text-white leading-tight">{tenant.name}</h1>
-            <p className="text-[11px] text-gray-400">👕 Camisas & Vestuário Personalizado</p>
+            <h1 className="font-bold text-lg leading-tight" style={{ color: textColor }}>{tenant.name}</h1>
+            <p className="text-[11px] opacity-70" style={{ color: textColor }}>👕 Camisas & Vestuário Personalizado</p>
           </div>
         </div>
       </div>
@@ -165,18 +183,25 @@ export default function CatalogoRoupas() {
         <div className="flex space-x-2 overflow-x-auto pb-1 scrollbar-none">
           <button
             onClick={() => setSelectedCategory('ALL')}
-            className={`px-3.5 py-2 rounded-xl text-xs font-bold whitespace-nowrap transition border ${
-              selectedCategory === 'ALL' ? 'bg-orange-500 border-orange-500 text-white' : 'bg-gray-900 border-gray-800 text-gray-400'
-            }`}>
+            style={
+              selectedCategory === 'ALL' 
+                ? { backgroundColor: primaryColor, color: buttonTextColor, borderColor: primaryColor } 
+                : { backgroundColor: cardBgColor, color: textColor, borderColor: 'rgba(255,255,255,0.1)' }
+            }
+            className="px-3.5 py-2 rounded-xl text-xs font-bold whitespace-nowrap transition border shadow-sm">
             Todas as Peças
           </button>
+          
           {categories.map(cat => (
             <button
               key={cat.id}
               onClick={() => setSelectedCategory(cat.id)}
-              className={`px-3.5 py-2 rounded-xl text-xs font-bold whitespace-nowrap transition border ${
-                String(selectedCategory) === String(cat.id) ? 'bg-orange-500 border-orange-500 text-white' : 'bg-gray-900 border-gray-800 text-gray-400'
-              }`}>
+              style={
+                String(selectedCategory) === String(cat.id) 
+                  ? { backgroundColor: primaryColor, color: buttonTextColor, borderColor: primaryColor } 
+                  : { backgroundColor: cardBgColor, color: textColor, borderColor: 'rgba(255,255,255,0.1)' }
+              }
+              className="px-3.5 py-2 rounded-xl text-xs font-bold whitespace-nowrap transition border shadow-sm">
               {cat.name}
             </button>
           ))}
@@ -193,20 +218,23 @@ export default function CatalogoRoupas() {
                 setSelectedColor('Preto');
                 setProductQuantity(1);
               }}
-              className="bg-gray-900 border border-gray-800 rounded-2xl p-2.5 space-y-2 cursor-pointer hover:border-orange-500/50 transition flex flex-col justify-between">
+              style={{ backgroundColor: cardBgColor, borderColor: 'rgba(255,255,255,0.1)' }}
+              className="border rounded-2xl p-2.5 space-y-2 cursor-pointer hover:border-white/30 transition flex flex-col justify-between shadow-lg">
               
               <div className="space-y-2">
                 <img
                   src={prod.image_url || 'https://images.unsplash.com/photo-1521572267360-ee0c2909d518?w=300&auto=format&fit=crop&q=80'}
                   alt={prod.name}
-                  className="w-full h-36 object-cover rounded-xl bg-gray-950"
+                  className="w-full h-36 object-cover rounded-xl bg-black/20"
                 />
-                <h3 className="font-bold text-xs text-white line-clamp-2">{prod.name}</h3>
+                <h3 className="font-bold text-xs line-clamp-2" style={{ color: textColor }}>{prod.name}</h3>
               </div>
 
-              <div className="flex justify-between items-center pt-1 border-t border-gray-800/80">
-                <span className="text-orange-400 font-bold text-xs">R$ {Number(prod.price).toFixed(2)}</span>
-                <span className="bg-orange-500/10 text-orange-400 text-[10px] font-bold px-2 py-0.5 rounded-lg border border-orange-500/20">
+              <div className="flex justify-between items-center pt-2 border-t border-white/10">
+                <span className="font-bold text-xs" style={{ color: primaryColor }}>R$ {Number(prod.price).toFixed(2)}</span>
+                <span 
+                  style={{ backgroundColor: `${primaryColor}20`, color: primaryColor, borderColor: `${primaryColor}40` }}
+                  className="text-[10px] font-bold px-2 py-0.5 rounded-lg border">
                   + Opções
                 </span>
               </div>
@@ -220,7 +248,8 @@ export default function CatalogoRoupas() {
         <div className="fixed bottom-4 left-4 right-4 max-w-md mx-auto z-40">
           <button
             onClick={() => setShowCartModal(true)}
-            className="w-full bg-orange-500 hover:bg-orange-600 text-white font-bold p-3.5 rounded-2xl shadow-2xl flex justify-between items-center text-xs transition">
+            style={{ backgroundColor: primaryColor, color: buttonTextColor }}
+            className="w-full font-bold p-3.5 rounded-2xl shadow-2xl flex justify-between items-center text-xs transition active:scale-95">
             <span className="bg-black/30 px-2.5 py-1 rounded-lg">🛒 {cart.length} item(ns)</span>
             <span>Ver Sacola de Compras ➔</span>
             <span>R$ {totalCart.toFixed(2)}</span>
@@ -230,33 +259,39 @@ export default function CatalogoRoupas() {
 
       {/* MODAL DE OPÇÕES DO PRODUTO (TAMANHO, COR E PERSONALIZAÇÃO) */}
       {activeProduct && (
-        <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 p-4">
-          <div className="bg-gray-900 border border-gray-800 w-full max-w-sm rounded-3xl p-5 space-y-4 shadow-2xl max-h-[90vh] overflow-y-auto">
-            <div className="flex justify-between items-center border-b border-gray-800 pb-2">
-              <h3 className="font-bold text-sm text-white">{activeProduct.name}</h3>
-              <button onClick={() => setActiveProduct(null)} className="text-gray-400 font-bold text-xs">✕ Fechar</button>
+        <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 p-4 backdrop-blur-sm">
+          <div 
+            style={{ backgroundColor: cardBgColor, color: textColor, borderColor: 'rgba(255,255,255,0.1)' }}
+            className="border w-full max-w-sm rounded-3xl p-5 space-y-4 shadow-2xl max-h-[90vh] overflow-y-auto">
+            
+            <div className="flex justify-between items-center border-b border-white/10 pb-2">
+              <h3 className="font-bold text-sm">{activeProduct.name}</h3>
+              <button onClick={() => setActiveProduct(null)} className="font-bold text-xs opacity-60 hover:opacity-100">✕ Fechar</button>
             </div>
 
             <img
               src={activeProduct.image_url || 'https://images.unsplash.com/photo-1521572267360-ee0c2909d518?w=300&auto=format&fit=crop&q=80'}
               alt={activeProduct.name}
-              className="w-full h-44 object-cover rounded-2xl bg-gray-950"
+              className="w-full h-44 object-cover rounded-2xl bg-black/20"
             />
 
-            <p className="text-xs text-gray-400">{activeProduct.description || 'Algodão 100% penteado de altíssima qualidade.'}</p>
+            <p className="text-xs opacity-70">{activeProduct.description || 'Algodão 100% penteado de altíssima qualidade.'}</p>
 
             {/* SELEÇÃO DE TAMANHO */}
             <div className="space-y-1.5">
-              <label className="text-[11px] font-bold text-gray-300 block">1. Selecione o Tamanho:</label>
+              <label className="text-[11px] font-bold block opacity-90">1. Selecione o Tamanho:</label>
               <div className="flex space-x-2">
                 {['P', 'M', 'G', 'GG', 'XGG'].map(size => (
                   <button
                     key={size}
                     type="button"
                     onClick={() => setSelectedSize(size)}
-                    className={`flex-1 py-2 rounded-xl font-bold text-xs border transition ${
-                      selectedSize === size ? 'bg-orange-500 border-orange-500 text-white' : 'bg-gray-800 border-gray-700 text-gray-300'
-                    }`}>
+                    style={
+                      selectedSize === size 
+                        ? { backgroundColor: primaryColor, color: buttonTextColor } 
+                        : { backgroundColor: 'rgba(255,255,255,0.05)', color: textColor }
+                    }
+                    className="flex-1 py-2 rounded-xl font-bold text-xs border border-white/10 transition">
                     {size}
                   </button>
                 ))}
@@ -265,16 +300,19 @@ export default function CatalogoRoupas() {
 
             {/* SELEÇÃO DE COR */}
             <div className="space-y-1.5">
-              <label className="text-[11px] font-bold text-gray-300 block">2. Selecione a Cor:</label>
+              <label className="text-[11px] font-bold block opacity-90">2. Selecione a Cor:</label>
               <div className="grid grid-cols-3 gap-2">
                 {['Preto', 'Branco', 'Mescla/Cinza', 'Marrom', 'Bege', 'Vermelho'].map(color => (
                   <button
                     key={color}
                     type="button"
                     onClick={() => setSelectedColor(color)}
-                    className={`py-1.5 px-2 rounded-xl font-bold text-[11px] border transition ${
-                      selectedColor === color ? 'bg-orange-500/20 border-orange-500 text-orange-400' : 'bg-gray-800 border-gray-700 text-gray-300'
-                    }`}>
+                    style={
+                      selectedColor === color 
+                        ? { backgroundColor: `${primaryColor}30`, borderColor: primaryColor, color: primaryColor } 
+                        : { backgroundColor: 'rgba(255,255,255,0.05)', borderColor: 'rgba(255,255,255,0.1)', color: textColor }
+                    }
+                    className="py-1.5 px-2 rounded-xl font-bold text-[11px] border transition">
                     {color}
                   </button>
                 ))}
@@ -283,13 +321,14 @@ export default function CatalogoRoupas() {
 
             {/* CAMPO DE PERSONALIZAÇÃO OPCIONAL */}
             <div className="space-y-1">
-              <label className="text-[11px] font-bold text-gray-300 block">3. Nome/Número para Estampar (Opcional):</label>
+              <label className="text-[11px] font-bold block opacity-90">3. Nome/Número para Estampar (Opcional):</label>
               <input
                 type="text"
                 placeholder="Ex: SILVA - #10 (ou deixe em branco)"
                 value={customText}
                 onChange={(e) => setCustomText(e.target.value)}
-                className="w-full bg-gray-950 border border-gray-800 p-2.5 rounded-xl text-xs text-white focus:outline-none focus:border-orange-500"
+                style={{ backgroundColor: secondaryColor, color: textColor, borderColor: 'rgba(255,255,255,0.15)' }}
+                className="w-full border p-2.5 rounded-xl text-xs focus:outline-none"
               />
             </div>
 
@@ -298,7 +337,8 @@ export default function CatalogoRoupas() {
               <button
                 type="button"
                 onClick={handleAddToCart}
-                className="bg-orange-500 hover:bg-orange-600 text-white font-bold px-5 py-2.5 rounded-xl text-xs transition">
+                style={{ backgroundColor: primaryColor, color: buttonTextColor }}
+                className="font-bold px-5 py-2.5 rounded-xl text-xs transition shadow-lg">
                 Adicionar à Sacola 🛍️
               </button>
             </div>
@@ -308,20 +348,26 @@ export default function CatalogoRoupas() {
 
       {/* MODAL DA SACOLA DE COMPRAS E CHECKOUT */}
       {showCartModal && (
-        <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 p-4">
-          <div className="bg-gray-900 border border-gray-800 w-full max-w-sm rounded-3xl p-5 space-y-4 shadow-2xl max-h-[90vh] overflow-y-auto">
-            <div className="flex justify-between items-center border-b border-gray-800 pb-2">
-              <h3 className="font-bold text-sm text-orange-400">🛍️ Sua Sacola de Compras</h3>
-              <button onClick={() => setShowCartModal(false)} className="text-gray-400 font-bold text-xs">✕ Fechar</button>
+        <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 p-4 backdrop-blur-sm">
+          <div 
+            style={{ backgroundColor: cardBgColor, color: textColor, borderColor: 'rgba(255,255,255,0.1)' }}
+            className="border w-full max-w-sm rounded-3xl p-5 space-y-4 shadow-2xl max-h-[90vh] overflow-y-auto">
+            
+            <div className="flex justify-between items-center border-b border-white/10 pb-2">
+              <h3 className="font-bold text-sm" style={{ color: primaryColor }}>🛍️ Sua Sacola de Compras</h3>
+              <button onClick={() => setShowCartModal(false)} className="font-bold text-xs opacity-60 hover:opacity-100">✕ Fechar</button>
             </div>
 
             <div className="space-y-2 max-h-48 overflow-y-auto">
               {cart.map(item => (
-                <div key={item.cartId} className="bg-gray-950 p-3 rounded-2xl border border-gray-800 text-xs flex justify-between items-center">
+                <div 
+                  key={item.cartId} 
+                  style={{ backgroundColor: secondaryColor, borderColor: 'rgba(255,255,255,0.1)' }}
+                  className="p-3 rounded-2xl border text-xs flex justify-between items-center">
                   <div>
-                    <h4 className="font-bold text-white">{item.quantity}x {item.name}</h4>
-                    <p className="text-[10px] text-gray-400">Tam: <b>{item.size}</b> | Cor: <b>{item.color}</b></p>
-                    {item.customText && <p className="text-[10px] text-orange-300 italic">Estampa: "{item.customText}"</p>}
+                    <h4 className="font-bold">{item.quantity}x {item.name}</h4>
+                    <p className="text-[10px] opacity-70">Tam: <b>{item.size}</b> | Cor: <b>{item.color}</b></p>
+                    {item.customText && <p className="text-[10px] italic" style={{ color: primaryColor }}>Estampa: "{item.customText}"</p>}
                     <span className="text-green-400 font-bold text-[11px]">R$ {(item.price * item.quantity).toFixed(2)}</span>
                   </div>
 
@@ -333,15 +379,16 @@ export default function CatalogoRoupas() {
             </div>
 
             {/* FORMULÁRIO DE ENTREGA */}
-            <form onSubmit={handleCheckout} className="space-y-2.5 pt-2 border-t border-gray-800 text-xs">
-              <h4 className="font-bold text-xs text-gray-300">Dados para Envio Nacional</h4>
+            <form onSubmit={handleCheckout} className="space-y-2.5 pt-2 border-t border-white/10 text-xs">
+              <h4 className="font-bold text-xs opacity-90">Dados para Envio Nacional</h4>
               <input
                 type="text"
                 required
                 placeholder="Seu Nome Completo"
                 value={customerName}
                 onChange={(e) => setCustomerName(e.target.value)}
-                className="w-full bg-gray-950 border border-gray-800 p-2.5 rounded-xl text-white focus:outline-none"
+                style={{ backgroundColor: secondaryColor, color: textColor, borderColor: 'rgba(255,255,255,0.15)' }}
+                className="w-full border p-2.5 rounded-xl focus:outline-none"
               />
               <input
                 type="text"
@@ -349,7 +396,8 @@ export default function CatalogoRoupas() {
                 placeholder="Seu WhatsApp (DDD + Número)"
                 value={customerPhone}
                 onChange={(e) => setCustomerPhone(e.target.value)}
-                className="w-full bg-gray-950 border border-gray-800 p-2.5 rounded-xl text-white focus:outline-none"
+                style={{ backgroundColor: secondaryColor, color: textColor, borderColor: 'rgba(255,255,255,0.15)' }}
+                className="w-full border p-2.5 rounded-xl focus:outline-none"
               />
               <input
                 type="text"
@@ -357,14 +405,16 @@ export default function CatalogoRoupas() {
                 placeholder="Endereço Completo com Número e Bairro"
                 value={customerAddress}
                 onChange={(e) => setCustomerAddress(e.target.value)}
-                className="w-full bg-gray-950 border border-gray-800 p-2.5 rounded-xl text-white focus:outline-none"
+                style={{ backgroundColor: secondaryColor, color: textColor, borderColor: 'rgba(255,255,255,0.15)' }}
+                className="w-full border p-2.5 rounded-xl focus:outline-none"
               />
               <input
                 type="text"
                 placeholder="CEP (para cálculo de envio)"
                 value={customerZip}
                 onChange={(e) => setCustomerZip(e.target.value)}
-                className="w-full bg-gray-950 border border-gray-800 p-2.5 rounded-xl text-white focus:outline-none"
+                style={{ backgroundColor: secondaryColor, color: textColor, borderColor: 'rgba(255,255,255,0.15)' }}
+                className="w-full border p-2.5 rounded-xl focus:outline-none"
               />
 
               <button
