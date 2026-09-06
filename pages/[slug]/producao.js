@@ -13,7 +13,7 @@ export default function FilaProducao() {
   useEffect(() => {
     if (router.isReady && slug) {
       fetchData();
-      const interval = setInterval(fetchData, 15000); // Auto-refresh a cada 15s
+      const interval = setInterval(fetchData, 15000);
       return () => clearInterval(interval);
     }
   }, [router.isReady, slug]);
@@ -41,7 +41,13 @@ export default function FilaProducao() {
     fetchData();
   };
 
-  // FUNÇÃO DE IMPRESSÃO DA ETIQUETA/PEDIDO
+  const handleDeleteOrder = async (orderId) => {
+    if (confirm(`Tem certeza que deseja excluir permanentemente o Pedido #${orderId}?`)) {
+      await supabase.from('orders').delete().eq('id', orderId);
+      fetchData();
+    }
+  };
+
   const handlePrintOrder = (order) => {
     const printWindow = window.open('', '_blank', 'width=600,height=700');
     const itemsList = Array.isArray(order.items) ? order.items : [];
@@ -149,7 +155,7 @@ export default function FilaProducao() {
                   <p className="text-[11px] text-gray-400">📱 {o.customer_phone}</p>
                 </div>
 
-                <button onClick={() => togglePaymentStatus(o)} className={`text-[10px] font-bold px-2.5 py-1 rounded-xl border ${o.payment_method?.includes('PAGO') ? 'bg-green-500/20 text-green-400 border-green-500/30' : 'bg-red-500/20 text-red-400 border-red-500/30'}`}>
+                <button onClick={() => togglePaymentStatus(o)} className={`text-[10px] font-bold px-2.5 py-1 rounded-xl border transition ${o.payment_method?.includes('PAGO') ? 'bg-green-500/20 text-green-400 border-green-500/30' : 'bg-red-500/20 text-red-400 border-red-500/30'}`}>
                   {o.payment_method?.includes('PAGO') ? '🟢 PAGO' : '🔴 PENDENTE'}
                 </button>
               </div>
@@ -170,9 +176,14 @@ export default function FilaProducao() {
 
               <div className="flex justify-between items-center pt-2 border-t border-gray-800 text-xs">
                 <span className="font-bold text-green-400">TOTAL: R$ {Number(o.total).toFixed(2)}</span>
-                <button onClick={() => handlePrintOrder(o)} className="bg-gray-800 hover:bg-gray-700 text-gray-200 px-2.5 py-1 rounded-lg font-bold text-[11px] border border-gray-700">
-                  🖨️ Imprimir Pedido
-                </button>
+                <div className="flex space-x-1.5">
+                  <button onClick={() => handlePrintOrder(o)} className="bg-gray-800 hover:bg-gray-700 text-gray-200 px-2.5 py-1 rounded-lg font-bold text-[11px] border border-gray-700">
+                    🖨️
+                  </button>
+                  <button onClick={() => handleDeleteOrder(o.id)} className="bg-red-500/20 hover:bg-red-500/30 text-red-400 px-2.5 py-1 rounded-lg font-bold text-[11px] border border-red-500/30">
+                    🗑️
+                  </button>
+                </div>
               </div>
 
               <button onClick={() => updateOrderStatus(o.id, 'em_producao')} className="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-2.5 rounded-xl text-xs transition">
@@ -195,7 +206,7 @@ export default function FilaProducao() {
                   <h3 className="font-bold text-sm text-white">PEDIDO #{o.id}</h3>
                   <p className="text-xs text-gray-300 font-bold mt-0.5">{o.customer_name}</p>
                 </div>
-                <button onClick={() => togglePaymentStatus(o)} className={`text-[10px] font-bold px-2.5 py-1 rounded-xl border ${o.payment_method?.includes('PAGO') ? 'bg-green-500/20 text-green-400 border-green-500/30' : 'bg-red-500/20 text-red-400 border-red-500/30'}`}>
+                <button onClick={() => togglePaymentStatus(o)} className={`text-[10px] font-bold px-2.5 py-1 rounded-xl border transition ${o.payment_method?.includes('PAGO') ? 'bg-green-500/20 text-green-400 border-green-500/30' : 'bg-red-500/20 text-red-400 border-red-500/30'}`}>
                   {o.payment_method?.includes('PAGO') ? '🟢 PAGO' : '🔴 PENDENTE'}
                 </button>
               </div>
@@ -210,9 +221,14 @@ export default function FilaProducao() {
 
               <div className="flex justify-between items-center pt-2 border-t border-gray-800 text-xs">
                 <span className="font-bold text-green-400">R$ {Number(o.total).toFixed(2)}</span>
-                <button onClick={() => handlePrintOrder(o)} className="bg-gray-800 hover:bg-gray-700 text-gray-200 px-2.5 py-1 rounded-lg font-bold text-[11px] border border-gray-700">
-                  🖨️ Imprimir
-                </button>
+                <div className="flex space-x-1.5">
+                  <button onClick={() => handlePrintOrder(o)} className="bg-gray-800 hover:bg-gray-700 text-gray-200 px-2.5 py-1 rounded-lg font-bold text-[11px] border border-gray-700">
+                    🖨️
+                  </button>
+                  <button onClick={() => handleDeleteOrder(o.id)} className="bg-red-500/20 hover:bg-red-500/30 text-red-400 px-2.5 py-1 rounded-lg font-bold text-[11px] border border-red-500/30">
+                    🗑️
+                  </button>
+                </div>
               </div>
 
               <button onClick={() => updateOrderStatus(o.id, 'pronto')} className="w-full bg-green-600 hover:bg-green-700 text-white font-bold py-2.5 rounded-xl text-xs transition">
@@ -239,9 +255,14 @@ export default function FilaProducao() {
                   ✓ ENVIADO
                 </span>
               </div>
-              <button onClick={() => handlePrintOrder(o)} className="w-full bg-gray-900 hover:bg-gray-800 text-gray-300 py-1.5 rounded-xl font-bold text-[11px] border border-gray-800 mt-2">
-                🖨️ Reimprimir Etiqueta
-              </button>
+              <div className="flex space-x-2 pt-2">
+                <button onClick={() => handlePrintOrder(o)} className="flex-1 bg-gray-900 hover:bg-gray-800 text-gray-300 py-1.5 rounded-xl font-bold text-[11px] border border-gray-800">
+                  🖨️ Etiqueta
+                </button>
+                <button onClick={() => handleDeleteOrder(o.id)} className="bg-red-500/20 hover:bg-red-500/30 text-red-400 px-3 py-1.5 rounded-xl font-bold text-[11px] border border-red-500/30">
+                  🗑️
+                </button>
+              </div>
             </div>
           ))}
         </div>
