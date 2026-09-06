@@ -57,7 +57,6 @@ export default function AdminTenant() {
     const { data: pData } = await supabase.from('products').select('*').eq('tenant_id', tenantId).order('id', { ascending: true });
     const { data: nData } = await supabase.from('neighborhoods').select('*').eq('tenant_id', tenantId).order('id', { ascending: true });
     
-    // Tenta buscar cupons sem travar caso a tabela não exista
     let cpData = [];
     try {
       const res = await supabase.from('coupons').select('*').eq('tenant_id', tenantId).order('id', { ascending: false });
@@ -91,7 +90,6 @@ export default function AdminTenant() {
       admin_password: tenant.admin_password || ''
     };
 
-    // Adiciona campos opcionais apenas se existirem no objeto
     if ('pix_key' in tenant) updatePayload.pix_key = tenant.pix_key || '';
     if ('promo_banners' in tenant) updatePayload.promo_banners = tenant.promo_banners || '';
     if ('opening_time' in tenant) updatePayload.opening_time = tenant.opening_time || '08:00';
@@ -200,11 +198,16 @@ export default function AdminTenant() {
     fetchData();
   };
 
-  // RELATÓRIOS
+  // RELATÓRIOS (SÓ CONTABILIZA PEDIDOS COM STATUS 'PAGO')
   const getFilteredOrders = () => {
     const now = new Date();
     return allOrders.filter(o => {
       if (o.status === 'cancelado') return false;
+      
+      // FILTRO RIGOROSO: Exige que o status de pagamento seja 'PAGO'
+      const isPaid = o.payment_method && o.payment_method.includes('PAGO');
+      if (!isPaid) return false;
+
       if (reportFilter === 'all') return true;
       if (!o.created_at) return true;
       const orderDate = new Date(o.created_at);
@@ -477,7 +480,7 @@ export default function AdminTenant() {
       {activeTab === 'reports' && (
         <div className="space-y-4">
           <div className="flex flex-col space-y-2 bg-gray-900 p-4 rounded-2xl border border-gray-800 text-xs">
-            <span className="text-gray-400 font-bold">Período de Vendas da Loja:</span>
+            <span className="text-gray-400 font-bold">Período de Vendas Confirmadas (🟢 PAGO):</span>
             <div className="flex space-x-1 overflow-x-auto pb-1">
               <button onClick={() => setReportFilter('all')} className={`px-3 py-1.5 rounded-xl font-bold text-xs ${reportFilter === 'all' ? 'bg-blue-600 text-white' : 'bg-gray-800 text-gray-400'}`}>Tudo</button>
               <button onClick={() => setReportFilter('today')} className={`px-3 py-1.5 rounded-xl font-bold text-xs ${reportFilter === 'today' ? 'bg-blue-600 text-white' : 'bg-gray-800 text-gray-400'}`}>Hoje</button>
@@ -488,20 +491,20 @@ export default function AdminTenant() {
 
           <div className="grid grid-cols-2 gap-3">
             <div className="bg-gray-900 p-4 rounded-2xl border border-gray-800">
-              <span className="text-[11px] text-gray-400 block mb-1">Faturamento</span>
+              <span className="text-[11px] text-gray-400 block mb-1">Faturamento Confirmado</span>
               <span className="text-lg font-bold text-green-400">R$ {totalRevenue.toFixed(2)}</span>
             </div>
             <div className="bg-gray-900 p-4 rounded-2xl border border-gray-800">
-              <span className="text-[11px] text-gray-400 block mb-1">Total de Pedidos</span>
+              <span className="text-[11px] text-gray-400 block mb-1">Pedidos Pagos</span>
               <span className="text-lg font-bold text-blue-400">{filteredOrders.length}</span>
             </div>
           </div>
 
           <section className="bg-gray-900 p-5 rounded-3xl border border-gray-800 space-y-3 shadow-xl">
-            <h3 className="font-bold text-xs text-blue-400 uppercase tracking-wider">🏆 PEÇAS MAIS VENDIDAS</h3>
+            <h3 className="font-bold text-xs text-blue-400 uppercase tracking-wider">🏆 PEÇAS MAIS VENDIDAS (CONFIRMADAS)</h3>
             <div className="space-y-2">
               {topProducts.length === 0 ? (
-                <p className="text-xs text-gray-400">Nenhum pedido registrado ainda.</p>
+                <p className="text-xs text-gray-400">Nenhum pedido pago no período selecionado.</p>
               ) : (
                 topProducts.map((p, idx) => (
                   <div key={idx} className="flex justify-between items-center bg-gray-950 p-3 rounded-xl text-xs border border-gray-800">
