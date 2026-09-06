@@ -56,7 +56,14 @@ export default function AdminTenant() {
     const { data: cData } = await supabase.from('categories').select('*').eq('tenant_id', tenantId).order('id', { ascending: true });
     const { data: pData } = await supabase.from('products').select('*').eq('tenant_id', tenantId).order('id', { ascending: true });
     const { data: nData } = await supabase.from('neighborhoods').select('*').eq('tenant_id', tenantId).order('id', { ascending: true });
-    const { data: cpData } = await supabase.from('coupons').select('*').eq('tenant_id', tenantId).order('id', { ascending: false });
+    
+    // Tenta buscar cupons sem travar caso a tabela não exista
+    let cpData = [];
+    try {
+      const res = await supabase.from('coupons').select('*').eq('tenant_id', tenantId).order('id', { ascending: false });
+      if (res.data) cpData = res.data;
+    } catch (err) {}
+
     const { data: oData } = await supabase.from('orders').select('*').eq('tenant_id', tenantId).order('created_at', { ascending: false });
 
     if (tData) setTenant(tData);
@@ -72,28 +79,37 @@ export default function AdminTenant() {
 
   const handleSaveTenantSettings = async (e) => {
     e.preventDefault();
-    const cleanWhatsapp = tenant.whatsapp ? tenant.whatsapp.replace(/\D/g, '') : '';
-    const { error } = await supabase.from('tenants').update({
-      name: tenant.name,
+    const cleanWhatsapp = tenant.whatsapp ? String(tenant.whatsapp).replace(/\D/g, '') : '';
+
+    const updatePayload = {
+      name: tenant.name || '',
       whatsapp: cleanWhatsapp,
-      logo_url: tenant.logo_url,
-      banner_url: tenant.banner_url,
-      promo_banners: tenant.promo_banners || '',
+      logo_url: tenant.logo_url || '',
+      banner_url: tenant.banner_url || '',
       primary_color: tenant.primary_color || '#3B82F6',
       secondary_color: tenant.secondary_color || '#090D16',
-      opening_time: tenant.opening_time || '08:00',
-      closing_time: tenant.closing_time || '18:00',
-      pixel_id: tenant.pixel_id || '',
-      custom_message: tenant.custom_message || '',
-      admin_password: tenant.admin_password,
-      pix_key: tenant.pix_key || '',
-      pix_enabled: tenant.pix_enabled || false,
-      pix_provider: tenant.pix_provider || 'mercadopago',
-      pix_access_token: tenant.pix_access_token || ''
-    }).eq('id', tenant.id);
+      admin_password: tenant.admin_password || ''
+    };
 
-    if (error) alert("Erro ao salvar: " + error.message);
-    else { alert("Configurações da loja salvas com sucesso!"); fetchData(); }
+    // Adiciona campos opcionais apenas se existirem no objeto
+    if ('pix_key' in tenant) updatePayload.pix_key = tenant.pix_key || '';
+    if ('promo_banners' in tenant) updatePayload.promo_banners = tenant.promo_banners || '';
+    if ('opening_time' in tenant) updatePayload.opening_time = tenant.opening_time || '08:00';
+    if ('closing_time' in tenant) updatePayload.closing_time = tenant.closing_time || '18:00';
+    if ('pixel_id' in tenant) updatePayload.pixel_id = tenant.pixel_id || '';
+    if ('custom_message' in tenant) updatePayload.custom_message = tenant.custom_message || '';
+    if ('pix_enabled' in tenant) updatePayload.pix_enabled = tenant.pix_enabled || false;
+    if ('pix_provider' in tenant) updatePayload.pix_provider = tenant.pix_provider || 'mercadopago';
+    if ('pix_access_token' in tenant) updatePayload.pix_access_token = tenant.pix_access_token || '';
+
+    const { error } = await supabase.from('tenants').update(updatePayload).eq('id', tenant.id);
+
+    if (error) {
+      alert("Erro ao salvar: " + error.message);
+    } else {
+      alert("Configurações salvas com sucesso!");
+      fetchData();
+    }
   };
 
   // MANIPULAÇÃO DE PEÇAS / PRODUTOS
@@ -135,7 +151,7 @@ export default function AdminTenant() {
     const cleanCode = newCoupon.code.trim().toUpperCase();
     const formattedVal = parseFloat(String(newCoupon.discount_value).replace(',', '.'));
 
-    await supabase.from('coupons').insert([{
+    const { error } = await supabase.from('coupons').insert([{
       tenant_id: tenant.id,
       code: cleanCode,
       discount_type: newCoupon.discount_type,
@@ -143,8 +159,12 @@ export default function AdminTenant() {
       active: true
     }]);
 
-    setNewCoupon({ code: '', discount_type: 'percent', discount_value: '' });
-    fetchData();
+    if (error) {
+      alert("Erro ao cadastrar cupom: Verifique se a tabela 'coupons' foi criada no SQL.");
+    } else {
+      setNewCoupon({ code: '', discount_type: 'percent', discount_value: '' });
+      fetchData();
+    }
   };
 
   // MANIPULAÇÃO DE FRETES
@@ -180,7 +200,7 @@ export default function AdminTenant() {
     fetchData();
   };
 
-  // CÁLCULO DOS RELATÓRIOS
+  // RELATÓRIOS
   const getFilteredOrders = () => {
     const now = new Date();
     return allOrders.filter(o => {
@@ -255,7 +275,7 @@ export default function AdminTenant() {
         </button>
       </header>
 
-      {/* ABAS DO SISTEMA */}
+      {/* ABAS */}
       <div className="flex space-x-1 bg-gray-900 p-1.5 rounded-2xl border border-gray-800 mb-6 text-[11px] font-bold overflow-x-auto">
         <button 
           onClick={() => setActiveTab('products')} 
@@ -306,17 +326,17 @@ export default function AdminTenant() {
           <section className="bg-gray-900 p-5 rounded-3xl border border-gray-800 space-y-4 shadow-xl">
             <h3 className="font-bold text-sm text-blue-400">➕ Cadastrar Peça / Produto</h3>
             <form onSubmit={handleAddProduct} className="space-y-3">
-              <input type="text" placeholder="Nome do Produto (Ex: Camisa Oversized Algodão)" value={newProd.name} className="w-full bg-gray-950 border border-gray-800 p-3 rounded-xl text-xs text-white focus:outline-none focus:border-blue-500" onChange={(e) => setNewProd({ ...newProd, name: e.target.value })} />
-              <input type="text" placeholder="Descrição da peça" value={newProd.description} className="w-full bg-gray-950 border border-gray-800 p-3 rounded-xl text-xs text-white focus:outline-none focus:border-blue-500" onChange={(e) => setNewProd({ ...newProd, description: e.target.value })} />
+              <input type="text" placeholder="Nome do Produto (Ex: Camisa Oversized Algodão)" value={newProd.name} className="w-full bg-gray-950 border border-gray-800 p-3 rounded-xl text-xs text-white focus:outline-none" onChange={(e) => setNewProd({ ...newProd, name: e.target.value })} />
+              <input type="text" placeholder="Descrição da peça" value={newProd.description} className="w-full bg-gray-950 border border-gray-800 p-3 rounded-xl text-xs text-white focus:outline-none" onChange={(e) => setNewProd({ ...newProd, description: e.target.value })} />
               
               <div className="flex space-x-2">
-                <input type="text" placeholder="Preço R$" value={newProd.price} className="w-1/2 bg-gray-950 border border-gray-800 p-3 rounded-xl text-xs text-white focus:outline-none focus:border-blue-500" onChange={(e) => setNewProd({ ...newProd, price: e.target.value })} />
-                <select value={newProd.category_id} className="w-1/2 bg-gray-950 border border-gray-800 p-3 rounded-xl text-xs text-white focus:outline-none focus:border-blue-500" onChange={(e) => setNewProd({ ...newProd, category_id: e.target.value })}>
+                <input type="text" placeholder="Preço R$" value={newProd.price} className="w-1/2 bg-gray-950 border border-gray-800 p-3 rounded-xl text-xs text-white focus:outline-none" onChange={(e) => setNewProd({ ...newProd, price: e.target.value })} />
+                <select value={newProd.category_id} className="w-1/2 bg-gray-950 border border-gray-800 p-3 rounded-xl text-xs text-white focus:outline-none" onChange={(e) => setNewProd({ ...newProd, category_id: e.target.value })}>
                   {categories.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
                 </select>
               </div>
 
-              <input type="text" placeholder="URL da Foto do Produto" value={newProd.image} className="w-full bg-gray-950 border border-gray-800 p-3 rounded-xl text-xs text-white focus:outline-none focus:border-blue-500" onChange={(e) => setNewProd({ ...newProd, image: e.target.value })} />
+              <input type="text" placeholder="URL da Foto do Produto" value={newProd.image} className="w-full bg-gray-950 border border-gray-800 p-3 rounded-xl text-xs text-white focus:outline-none" onChange={(e) => setNewProd({ ...newProd, image: e.target.value })} />
 
               <button type="submit" className="w-full bg-blue-600 hover:bg-blue-700 font-bold py-3 rounded-xl text-xs text-white transition shadow-lg">
                 Salvar Produto 👕
@@ -399,7 +419,7 @@ export default function AdminTenant() {
         </div>
       )}
 
-      {/* FRETE / FRETES NACIONAIS */}
+      {/* FRETE */}
       {activeTab === 'neighborhoods' && (
         <div className="space-y-6">
           <section className="bg-gray-900 p-5 rounded-3xl border border-gray-800 space-y-4 shadow-xl">
@@ -428,7 +448,7 @@ export default function AdminTenant() {
         </div>
       )}
 
-      {/* COLEÇÕES / CATEGORIAS */}
+      {/* COLEÇÕES */}
       {activeTab === 'categories' && (
         <div className="space-y-6">
           <section className="bg-gray-900 p-5 rounded-3xl border border-gray-800 space-y-4 shadow-xl">
@@ -495,7 +515,7 @@ export default function AdminTenant() {
         </div>
       )}
 
-      {/* CONFIGURAÇÕES DA LOJA */}
+      {/* CONFIGURAÇÕES */}
       {activeTab === 'settings' && (
         <div className="space-y-6">
           <section className="bg-gray-900 p-5 rounded-3xl border border-gray-800 space-y-4 shadow-xl">
