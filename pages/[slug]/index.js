@@ -12,15 +12,19 @@ export default function EcommerceCliente() {
   const [selectedCat, setSelectedCat] = useState('ALL');
   const [loading, setLoading] = useState(true);
 
-  // MODAL DE DETALHES DO PRODUTO (VARIAÇÃO / OBSERVAÇÃO)
+  // LISTA DE TAMANHOS DE ROUPA PADRÃO
+  const AVAILABLE_SIZES = ['P', 'M', 'G', 'GG', 'XG'];
+
+  // MODAL DE DETALHES DO PRODUTO (TAMANHO E OBSERVAÇÃO)
   const [selectedProduct, setSelectedProduct] = useState(null);
+  const [selectedSize, setSelectedSize] = useState('M');
   const [productQuantity, setProductQuantity] = useState(1);
   const [productNote, setProductNote] = useState('');
 
   // CARRINHO E CHECKOUT
   const [cart, setCart] = useState([]);
   const [showCartModal, setShowCartModal] = useState(false);
-  const [deliveryType, setDeliveryType] = useState('ENTREGA');
+  const [deliveryType, setDeliveryType] = useState('ENTREGA'); // 'ENTREGA' ou 'RETIRADA'
   const [shippingFee, setShippingFee] = useState(10.00);
   const [customerName, setCustomerName] = useState('');
   const [customerPhone, setCustomerPhone] = useState('');
@@ -66,6 +70,7 @@ export default function EcommerceCliente() {
 
   const handleOpenProductModal = (product) => {
     setSelectedProduct(product);
+    setSelectedSize('M');
     setProductQuantity(1);
     setProductNote('');
   };
@@ -74,9 +79,10 @@ export default function EcommerceCliente() {
     if (!selectedProduct) return;
 
     const cartItem = {
-      cartItemId: `${selectedProduct.id}-${Date.now()}`,
+      cartItemId: `${selectedProduct.id}-${selectedSize}-${Date.now()}`,
       id: selectedProduct.id,
       name: selectedProduct.name,
+      size: selectedSize,
       price: Number(selectedProduct.price),
       quantity: productQuantity,
       note: productNote,
@@ -88,7 +94,7 @@ export default function EcommerceCliente() {
 
     if (window.fbq) {
       window.fbq('track', 'AddToCart', {
-        content_name: selectedProduct.name,
+        content_name: `${selectedProduct.name} (${selectedSize})`,
         value: Number(selectedProduct.price) * productQuantity,
         currency: 'BRL'
       });
@@ -130,8 +136,8 @@ export default function EcommerceCliente() {
     }
 
     let itemsText = cart.map(i => {
-      let txt = `• ${i.quantity}x ${i.name} (R$ ${(Number(i.price) * i.quantity).toFixed(2)})`;
-      if (i.note) txt += `\n   Opção/Obs: _"${i.note}"_`;
+      let txt = `• ${i.quantity}x ${i.name} [Tamanho: ${i.size}] (R$ ${(Number(i.price) * i.quantity).toFixed(2)})`;
+      if (i.note) txt += `\n   Obs: _"${i.note}"_`;
       return txt;
     }).join('\n\n');
 
@@ -173,7 +179,7 @@ export default function EcommerceCliente() {
         </div>
       </div>
 
-      {/* BANNERS DE PROMOÇÃO */}
+      {/* BANNERS PROMOCIONAIS */}
       {promoBannerList.length > 0 && (
         <div className="mt-8 px-4">
           <div className="flex space-x-3 overflow-x-auto pb-2 scrollbar-none">
@@ -231,7 +237,7 @@ export default function EcommerceCliente() {
             <div className="mt-2 pt-2 border-t border-white/10 flex justify-between items-center">
               <span className="font-bold text-xs" style={{ color: primaryColor }}>R$ {Number(p.price).toFixed(2)}</span>
               <button style={{ backgroundColor: primaryColor, color: btnTextColor }} className="px-2.5 py-1 rounded-lg text-xs font-bold transition shadow">
-                Ver
+                Ver Peça
               </button>
             </div>
           </div>
@@ -252,7 +258,7 @@ export default function EcommerceCliente() {
         </div>
       )}
 
-      {/* MODAL DE DETALHES DO PRODUTO */}
+      {/* MODAL DE DETALHES DO PRODUTO / ESCOLHA DE TAMANHO */}
       {selectedProduct && (
         <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 p-4">
           <div style={{ backgroundColor: cardColor, color: textColor }} className="border border-white/10 w-full max-w-sm rounded-2xl p-5 space-y-4 shadow-2xl max-h-[90vh] overflow-y-auto">
@@ -268,12 +274,36 @@ export default function EcommerceCliente() {
               <p className="text-xs opacity-70">{selectedProduct.description}</p>
             </div>
 
-            {/* VARIAÇÃO OU OBSERVAÇÃO (Ex: Tamanho / Cor) */}
-            <div className="space-y-1 pt-2 border-t border-white/10">
-              <label className="text-xs font-bold block opacity-80">📐 Tamanho / Cor / Observação:</label>
+            {/* SELETOR DE TAMANHOS EM BOTÕES */}
+            <div className="space-y-2 pt-2 border-t border-white/10">
+              <label className="text-xs font-bold block opacity-80">🏷️ Selecione o Tamanho da Peça:</label>
+              <div className="grid grid-cols-5 gap-2">
+                {AVAILABLE_SIZES.map(size => {
+                  const isSelected = selectedSize === size;
+                  return (
+                    <button
+                      key={size}
+                      type="button"
+                      onClick={() => setSelectedSize(size)}
+                      style={{
+                        backgroundColor: isSelected ? primaryColor : bgColor,
+                        color: isSelected ? btnTextColor : textColor,
+                        borderColor: isSelected ? primaryColor : 'rgba(255,255,255,0.1)'
+                      }}
+                      className="py-2 rounded-xl text-xs font-bold border transition text-center">
+                      {size}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* CAMPO DE OBSERVAÇÕES PARA OUTROS DETALHES */}
+            <div className="space-y-1 pt-1">
+              <label className="text-xs font-bold block opacity-80">📝 Observação (Opcional):</label>
               <input
                 type="text"
-                placeholder="Ex: Tamanho M, Cor Preta..."
+                placeholder="Ex: Embalar para presente, instrução de envio..."
                 value={productNote}
                 onChange={(e) => setProductNote(e.target.value)}
                 style={{ backgroundColor: bgColor, color: textColor }}
@@ -293,7 +323,7 @@ export default function EcommerceCliente() {
                 onClick={handleAddProductToCart}
                 style={{ backgroundColor: primaryColor, color: btnTextColor }}
                 className="flex-1 font-bold py-3 rounded-xl text-xs shadow-lg transition">
-                Adicionar à Sacola • R$ {(Number(selectedProduct.price) * productQuantity).toFixed(2)}
+                Adicionar ({selectedSize}) • R$ {(Number(selectedProduct.price) * productQuantity).toFixed(2)}
               </button>
             </div>
           </div>
@@ -314,8 +344,9 @@ export default function EcommerceCliente() {
                 <div key={item.cartItemId} style={{ backgroundColor: bgColor }} className="p-2.5 rounded-xl border border-white/10 flex justify-between items-start text-xs space-x-2">
                   <div className="flex-1">
                     <span className="font-bold block">{item.quantity}x {item.name}</span>
+                    <span className="text-[10px] font-bold text-orange-400 block">Tamanho: {item.size}</span>
                     {item.note && (
-                      <p className="text-[10px] text-orange-400 italic">Opção: "{item.note}"</p>
+                      <p className="text-[10px] opacity-60 italic">Obs: "{item.note}"</p>
                     )}
                     <span style={{ color: primaryColor }} className="font-bold block mt-0.5">R$ {(Number(item.price) * item.quantity).toFixed(2)}</span>
                   </div>
