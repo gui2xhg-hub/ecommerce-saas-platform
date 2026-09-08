@@ -2,34 +2,31 @@ import React, { useState, useEffect } from 'react';
 import { useRouter } from 'next/router';
 import { supabase } from '../../lib/supabase';
 
-export default function TenantVitrine() {
+export default function EcommerceCliente() {
   const router = useRouter();
   const { slug } = router.query;
 
   const [tenant, setTenant] = useState(null);
   const [categories, setCategories] = useState([]);
   const [products, setProducts] = useState([]);
-  const [neighborhoods, setNeighborhoods] = useState([]);
-  const [selectedCategory, setSelectedCategory] = useState('ALL');
-  const [searchTerm, setSearchTerm] = useState('');
-  const [cart, setCart] = useState([]);
-  const [isCartOpen, setIsCartOpen] = useState(false);
-  const [selectedProduct, setSelectedProduct] = useState(null);
+  const [selectedCat, setSelectedCat] = useState('ALL');
   const [loading, setLoading] = useState(true);
 
-  // FORMULÁRIO DE CHECKOUT
+  // MODAL DE DETALHES DO PRODUTO (VARIAÇÃO / OBSERVAÇÃO)
+  const [selectedProduct, setSelectedProduct] = useState(null);
+  const [productQuantity, setProductQuantity] = useState(1);
+  const [productNote, setProductNote] = useState('');
+
+  // CARRINHO E CHECKOUT
+  const [cart, setCart] = useState([]);
+  const [showCartModal, setShowCartModal] = useState(false);
+  const [deliveryType, setDeliveryType] = useState('ENTREGA');
+  const [shippingFee, setShippingFee] = useState(10.00);
   const [customerName, setCustomerName] = useState('');
   const [customerPhone, setCustomerPhone] = useState('');
-  const [address, setAddress] = useState('');
-  const [selectedNeighFee, setSelectedNeighFee] = useState(0);
-  const [selectedNeighName, setSelectedNeighName] = useState('Retirada / Combinar no Local');
-  const [couponCode, setCouponCode] = useState('');
-  const [appliedCoupon, setAppliedCoupon] = useState(null);
-  const [copiedPix, setCopiedPix] = useState(false);
-
-  // SELEÇÃO DE TAMANHO E QUANTIDADE
-  const [selectedSize, setSelectedSize] = useState('M');
-  const [quantity, setQuantity] = useState(1);
+  const [customerAddress, setCustomerAddress] = useState('');
+  const [paymentMethod, setPaymentMethod] = useState('PIX');
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   useEffect(() => {
     if (router.isReady && slug) {
@@ -38,415 +35,364 @@ export default function TenantVitrine() {
   }, [router.isReady, slug]);
 
   const fetchTenantData = async () => {
+    setLoading(true);
     const cleanSlug = String(slug).toLowerCase().trim();
-
-    const { data: tData } = await supabase.from('tenants').select('*').eq('slug', cleanSlug).single();
+    const { data: tData } = await supabase.from('tenants').select('*').eq('slug', cleanSlug).maybeSingle();
 
     if (tData) {
       setTenant(tData);
 
+      // CARREGA PIXEL DO META
+      if (tData.pixel_id && typeof window !== 'undefined') {
+        !(function (f, b, e, v, n, t, s) {
+          if (f.fbq) return; n = f.fbq = function () { n.callMethod ? n.callMethod.apply(n, arguments) : n.queue.push(arguments); };
+          if (!f._fbq) f._fbq = n; n.push = n; n.loaded = !0; n.version = '2.0';
+          n.queue = []; t = b.createElement(e); t.async = !0;
+          t.src = v; s = b.getElementsByTagName(e)[0];
+          s.parentNode.insertBefore(t, s);
+        })(window, document, 'script', 'https://connect.facebook.net/en_US/fbevents.js');
+        window.fbq('init', tData.pixel_id);
+        window.fbq('track', 'PageView');
+      }
+
       const { data: cData } = await supabase.from('categories').select('*').eq('tenant_id', tData.id).order('id', { ascending: true });
       const { data: pData } = await supabase.from('products').select('*').eq('tenant_id', tData.id).eq('active', true).order('id', { ascending: true });
-      const { data: nData } = await supabase.from('neighborhoods').select('*').eq('tenant_id', tData.id).order('fee', { ascending: true });
 
       if (cData) setCategories(cData);
       if (pData) setProducts(pData);
-      if (nData) setNeighborhoods(nData);
     }
     setLoading(false);
   };
 
-  // APLICAR CUPOM
-  const handleApplyCoupon = async () => {
-    if (!couponCode.trim()) return;
-    const cleanCode = couponCode.trim().toUpperCase();
-
-    const { data: cData } = await supabase
-      .from('coupons')
-      .select('*')
-      .eq('tenant_id', tenant.id)
-      .eq('code', cleanCode)
-      .eq('active', true)
-      .single();
-
-    if (cData) {
-      setAppliedCoupon(cData);
-      alert(`Cupom "${cData.code}" aplicado com sucesso!`);
-    } else {
-      alert("Cupom inválido ou expirado!");
-    }
+  const handleOpenProductModal = (product) => {
+    setSelectedProduct(product);
+    setProductQuantity(1);
+    setProductNote('');
   };
 
-  // ADICIONAR AO CARRINHO
-  const handleAddToCart = (product) => {
+  const handleAddProductToCart = () => {
+    if (!selectedProduct) return;
+
     const cartItem = {
-      ...product,
-      size: selectedSize,
-      quantity: quantity,
-      cartId: `${product.id}-${selectedSize}`
+      cartItemId: `${selectedProduct.id}-${Date.now()}`,
+      id: selectedProduct.id,
+      name: selectedProduct.name,
+      price: Number(selectedProduct.price),
+      quantity: productQuantity,
+      note: productNote,
+      image: selectedProduct.image
     };
 
-    setCart(prev => {
-      const existingIdx = prev.findIndex(item => item.cartId === cartItem.cartId);
-      if (existingIdx > -1) {
-        const updated = [...prev];
-        updated[existingIdx].quantity += quantity;
-        return updated;
-      }
-      return [...prev, cartItem];
-    });
-
+    setCart([...cart, cartItem]);
     setSelectedProduct(null);
-    setQuantity(1);
-    setSelectedSize('M');
-  };
 
-  const removeFromCart = (cartId) => {
-    setCart(prev => prev.filter(item => item.cartId !== cartId));
-  };
-
-  // CÁLCULO DE VALORES
-  const subtotal = cart.reduce((sum, item) => sum + Number(item.price) * Number(item.quantity), 0);
-  
-  let discountAmount = 0;
-  if (appliedCoupon) {
-    if (appliedCoupon.discount_type === 'percent') {
-      discountAmount = (subtotal * Number(appliedCoupon.discount_value)) / 100;
-    } else {
-      discountAmount = Number(appliedCoupon.discount_value);
+    if (window.fbq) {
+      window.fbq('track', 'AddToCart', {
+        content_name: selectedProduct.name,
+        value: Number(selectedProduct.price) * productQuantity,
+        currency: 'BRL'
+      });
     }
-  }
+  };
 
-  const deliveryFee = Number(selectedNeighFee || 0);
-  const total = Math.max(0, subtotal - discountAmount) + deliveryFee;
+  const removeFromCart = (cartItemId) => {
+    setCart(cart.filter(item => item.cartItemId !== cartItemId));
+  };
 
-  // CHECKOUT WHATSAPP
-  const handleCheckout = async (e) => {
+  if (loading) return <div className="min-h-screen bg-gray-950 text-white flex items-center justify-center font-sans"><p className="text-xs text-gray-400">Carregando loja...</p></div>;
+  if (!tenant) return <div className="min-h-screen bg-gray-950 text-white flex items-center justify-center font-sans"><h1 className="text-xl font-bold text-orange-500">Loja não encontrada</h1></div>;
+
+  // VARIÁVEIS DE CORES DINÂMICAS DO MASTER
+  const primaryColor = tenant.primary_color || '#FF8C00';
+  const btnTextColor = tenant.button_text_color || '#FFFFFF';
+  const bgColor = tenant.background_color || tenant.secondary_color || '#090D16';
+  const cardColor = tenant.card_color || '#111827';
+  const textColor = tenant.text_color || '#FFFFFF';
+
+  const subtotal = cart.reduce((sum, item) => sum + (Number(item.price) * item.quantity), 0);
+  const currentFee = deliveryType === 'ENTREGA' ? shippingFee : 0;
+  const total = subtotal + currentFee;
+
+  const filteredProducts = selectedCat === 'ALL' ? products : products.filter(p => String(p.category_id) === String(selectedCat));
+
+  const promoBannerList = tenant.promo_banners ? tenant.promo_banners.split(',').map(b => b.trim()).filter(Boolean) : [];
+
+  const handleFinishOrder = async (e) => {
     e.preventDefault();
-    if (cart.length === 0) return alert("Sua sacola está vazia!");
+    if (cart.length === 0) return alert("Seu carrinho está vazio!");
     if (!customerName || !customerPhone) return alert("Preencha seu Nome e WhatsApp!");
+    if (deliveryType === 'ENTREGA' && !customerAddress) return alert("Preencha seu Endereço para entrega!");
 
-    const orderPayload = {
-      tenant_id: tenant.id,
-      customer_name: customerName,
-      customer_phone: customerPhone,
-      address: address || 'Retirada na loja',
-      neighborhood: selectedNeighName,
-      delivery_fee: deliveryFee,
-      subtotal: subtotal,
-      total: total,
-      items: cart,
-      status: 'recebido',
-      payment_method: 'PIX / Pendente'
-    };
+    setIsSubmitting(true);
 
-    const { data: newOrder } = await supabase.from('orders').insert([orderPayload]).select().single();
+    if (window.fbq) {
+      window.fbq('track', 'Purchase', { value: total, currency: 'BRL' });
+    }
 
-    let message = `👕 *NOVO PEDIDO #${newOrder ? newOrder.id : ''} - ${tenant.name}*\n\n`;
-    message += `👤 *Cliente:* ${customerName}\n`;
-    message += `📱 *Telefone:* ${customerPhone}\n`;
-    message += `📍 *Endereço/Envio:* ${address || 'A combinar'} (${selectedNeighName})\n\n`;
-    message += `📦 *PEÇAS ESCOLHIDAS:*\n`;
+    let itemsText = cart.map(i => {
+      let txt = `• ${i.quantity}x ${i.name} (R$ ${(Number(i.price) * i.quantity).toFixed(2)})`;
+      if (i.note) txt += `\n   Opção/Obs: _"${i.note}"_`;
+      return txt;
+    }).join('\n\n');
 
-    cart.forEach(item => {
-      message += `• *${item.quantity}x ${item.name}* (Tam: *${item.size}*) - R$ ${(Number(item.price) * item.quantity).toFixed(2)}\n`;
-    });
+    let msg = `*NOVA COMPRA NA LOJA - ${tenant.name.toUpperCase()}*\n\n`;
+    msg += `*Cliente:* ${customerName}\n*Telefone:* ${customerPhone}\n`;
+    msg += `*Tipo:* ${deliveryType === 'ENTREGA' ? `Entrega em: ${customerAddress}` : 'Retirar na Loja'}\n\n`;
+    msg += `*ITENS COMPRADOS:*\n${itemsText}\n\n`;
+    msg += `*Subtotal:* R$ ${subtotal.toFixed(2)}\n`;
+    msg += `*Frete/Envio:* R$ ${currentFee.toFixed(2)}\n`;
+    msg += `*TOTAL:* *R$ ${total.toFixed(2)}*\n`;
+    msg += `*Forma de Pagamento:* ${paymentMethod}`;
 
-    message += `\n💰 *Subtotal:* R$ ${subtotal.toFixed(2)}\n`;
-    if (discountAmount > 0) message += `🎟️ *Desconto (${appliedCoupon?.code}):* -R$ ${discountAmount.toFixed(2)}\n`;
-    message += `📦 *Frete:* R$ ${deliveryFee.toFixed(2)}\n`;
-    message += `💳 *TOTAL:* *R$ ${total.toFixed(2)}*\n\n`;
-    message += `⚡ *Pagamento:* PIX (Aguardando comprovante)`;
+    if (tenant.custom_message) {
+      msg += `\n\n📌 _${tenant.custom_message}_`;
+    }
 
-    const cleanZap = tenant.whatsapp ? tenant.whatsapp.replace(/\D/g, '') : '';
-    const whatsappUrl = `https://api.whatsapp.com/send?phone=55${cleanZap}&text=${encodeURIComponent(message)}`;
+    const cleanWhatsapp = tenant.whatsapp ? tenant.whatsapp.replace(/\D/g, '') : '';
+    if (cleanWhatsapp) {
+      window.open(`https://wa.me/${cleanWhatsapp}?text=${encodeURIComponent(msg)}`, '_blank');
+    }
 
-    window.open(whatsappUrl, '_blank');
+    setIsSubmitting(false);
+    setCart([]);
+    setShowCartModal(false);
+    alert("Pedido de compra enviado para o WhatsApp!");
   };
-
-  const handleCopyPix = () => {
-    if (!tenant?.pix_key) return alert("Chave PIX não cadastrada nesta loja!");
-    navigator.clipboard.writeText(tenant.pix_key);
-    setCopiedPix(true);
-    setTimeout(() => setCopiedPix(false), 3000);
-  };
-
-  if (loading) return <div className="min-h-screen bg-gray-950 text-white flex items-center justify-center font-sans"><p className="text-xs text-gray-400">Carregando catálogo...</p></div>;
-  if (!tenant) return <div className="min-h-screen bg-gray-950 text-white flex items-center justify-center font-sans"><h1 className="text-xl font-bold text-blue-500">Loja não encontrada</h1></div>;
-
-  // 🎨 CONFIGURAÇÃO DAS CORES DINÂMICAS DO TEMA DO CLIENTE
-  const primaryColor = tenant.primary_color || '#3B82F6';
-  const buttonTextColor = tenant.button_text_color || '#FFFFFF';
-  const secondaryColor = tenant.secondary_color || '#090D16'; // Fundo da página
-  const cardBgColor = tenant.card_bg_color || '#111827';       // Fundo dos cards e modais
-  const textColor = tenant.text_color || '#FFFFFF';             // Cor da fonte geral
-
-  // LOGO E BANNER DO BANCO
-  const bannerUrl = (tenant.banner_url && tenant.banner_url.trim() !== '') 
-    ? tenant.banner_url 
-    : 'https://images.unsplash.com/photo-1441986300917-64674bd600d8?w=1200&auto=format&fit=crop&q=80';
-
-  const logoUrl = (tenant.logo_url && tenant.logo_url.trim() !== '') 
-    ? tenant.logo_url 
-    : 'https://images.unsplash.com/photo-1521572267360-ee0c2909d518?w=150&auto=format&fit=crop&q=80';
-
-  const filteredProducts = products.filter(p => {
-    const matchesCategory = selectedCategory === 'ALL' || p.category_id === Number(selectedCategory);
-    const matchesSearch = p.name.toLowerCase().includes(searchTerm.toLowerCase());
-    return matchesCategory && matchesSearch;
-  });
 
   return (
-    <div className="min-h-screen font-sans pb-24 transition-colors duration-300" style={{ backgroundColor: secondaryColor, color: textColor }}>
-      
-      {/* CAPA / BANNER SUPERIOR */}
-      <div className="relative h-48 md:h-64 w-full overflow-hidden" style={{ backgroundColor: cardBgColor }}>
-        <img src={bannerUrl} alt={tenant.name} className="w-full h-full object-cover opacity-70" />
-        <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/20 to-transparent"></div>
-      </div>
-
-      {/* PERFIL DA LOJA */}
-      <div className="max-w-3xl mx-auto px-4 -mt-16 relative z-10 space-y-4">
-        <div className="flex items-end space-x-4">
-          <img src={logoUrl} alt={tenant.name} className="w-24 h-24 rounded-3xl object-cover border-4 shadow-2xl" style={{ borderColor: secondaryColor, backgroundColor: cardBgColor }} />
-          <div className="pb-1">
-            <h1 className="font-bold text-xl md:text-2xl" style={{ color: textColor }}>{tenant.name}</h1>
-            <p className="text-xs opacity-75">👕 Camisas & Vestuário Digital</p>
+    <div className="min-h-screen font-sans pb-24 max-w-md mx-auto transition-colors duration-300" style={{ backgroundColor: bgColor, color: textColor }}>
+      {/* CAPA DA LOJA */}
+      <div className="relative h-36 bg-gray-900 border-b border-white/10">
+        <img src={tenant.banner_url || 'https://images.unsplash.com/photo-1441986300917-64674bd600d8?w=800&auto=format&fit=crop&q=80'} alt="Capa da Loja" className="w-full h-full object-cover opacity-50" />
+        <div className="absolute -bottom-5 left-4 flex items-center space-x-3">
+          <img src={tenant.logo_url || 'https://images.unsplash.com/photo-1522335789203-aabd1fc54bc9?w=150&auto=format&fit=crop&q=80'} alt="Logo" className="w-16 h-16 rounded-full border-2 border-black/40 object-cover bg-gray-800 shadow-lg" />
+          <div className="pt-4">
+            <h1 className="font-bold text-lg leading-tight" style={{ color: textColor }}>{tenant.name}</h1>
+            <p className="text-[11px] opacity-70">🛍️ Catálogo Online & E-commerce</p>
           </div>
         </div>
+      </div>
 
-        {/* BARRA DE PESQUISA */}
-        <div className="relative">
-          <input 
-            type="text" 
-            placeholder="🔍 Buscar peça pelo nome..." 
-            value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
-            style={{ backgroundColor: cardBgColor, color: textColor, borderColor: 'rgba(255,255,255,0.1)' }}
-            className="w-full border p-3.5 pl-10 rounded-2xl text-xs focus:outline-none shadow-lg"
-          />
+      {/* BANNERS DE PROMOÇÃO */}
+      {promoBannerList.length > 0 && (
+        <div className="mt-8 px-4">
+          <div className="flex space-x-3 overflow-x-auto pb-2 scrollbar-none">
+            {promoBannerList.map((bannerUrl, idx) => (
+              <img key={idx} src={bannerUrl} alt={`Destaque ${idx + 1}`} className="w-72 h-32 rounded-2xl object-cover border border-white/10 shrink-0 shadow-md" />
+            ))}
+          </div>
         </div>
+      )}
 
-        {/* NAVEGAÇÃO DE COLEÇÕES */}
-        <div className="flex space-x-2 overflow-x-auto pb-2 text-xs font-bold scrollbar-none">
-          <button 
-            onClick={() => setSelectedCategory('ALL')}
-            style={selectedCategory === 'ALL' ? { backgroundColor: primaryColor, color: buttonTextColor } : { backgroundColor: cardBgColor, color: textColor, borderColor: 'rgba(255,255,255,0.1)' }}
-            className="px-4 py-2.5 rounded-xl whitespace-nowrap border transition shadow-md">
-            Todas as Peças
+      {/* CATEGORIAS */}
+      <div className={`${promoBannerList.length > 0 ? 'mt-4' : 'mt-8'} px-4`}>
+        <div className="flex space-x-2 overflow-x-auto pb-2 scrollbar-none">
+          <button
+            onClick={() => setSelectedCat('ALL')}
+            style={{ 
+              backgroundColor: selectedCat === 'ALL' ? primaryColor : cardColor,
+              color: selectedCat === 'ALL' ? btnTextColor : textColor
+            }}
+            className="px-3.5 py-1.5 rounded-full text-xs font-bold whitespace-nowrap border border-white/10 transition">
+            Todos
           </button>
-
-          {categories.map(c => (
-            <button 
-              key={c.id}
-              onClick={() => setSelectedCategory(c.id)}
-              style={selectedCategory === c.id ? { backgroundColor: primaryColor, color: buttonTextColor } : { backgroundColor: cardBgColor, color: textColor, borderColor: 'rgba(255,255,255,0.1)' }}
-              className="px-4 py-2.5 rounded-xl whitespace-nowrap border transition shadow-md">
-              {c.name}
-            </button>
-          ))}
+          {categories.map(c => {
+            const isSelected = String(selectedCat) === String(c.id);
+            return (
+              <button
+                key={c.id}
+                onClick={() => setSelectedCat(c.id)}
+                style={{ 
+                  backgroundColor: isSelected ? primaryColor : cardColor,
+                  color: isSelected ? btnTextColor : textColor
+                }}
+                className="px-3.5 py-1.5 rounded-full text-xs font-bold whitespace-nowrap border border-white/10 transition">
+                {c.name}
+              </button>
+            );
+          })}
         </div>
       </div>
 
-      {/* GRADE DE PRODUTOS */}
-      <main className="max-w-3xl mx-auto px-4 mt-6 grid grid-cols-2 gap-3.5">
+      {/* GRID DE PRODUTOS */}
+      <div className="mt-4 px-4 grid grid-cols-2 gap-3">
         {filteredProducts.map(p => (
           <div 
             key={p.id} 
-            onClick={() => setSelectedProduct(p)}
-            style={{ backgroundColor: cardBgColor, borderColor: 'rgba(255,255,255,0.08)' }}
-            className="border rounded-3xl p-3 flex flex-col justify-between cursor-pointer hover:opacity-90 transition shadow-lg group">
-            
-            <div className="space-y-2">
-              <div className="w-full h-36 md:h-44 rounded-2xl overflow-hidden relative" style={{ backgroundColor: secondaryColor }}>
-                <img src={p.image} alt={p.name} className="w-full h-full object-cover group-hover:scale-105 transition duration-300" />
-              </div>
-              <div>
-                <h3 className="font-bold text-xs line-clamp-1" style={{ color: textColor }}>{p.name}</h3>
-                <p className="text-[11px] opacity-70 line-clamp-1 mt-0.5">{p.description || 'Tecido premium e caimento perfeito.'}</p>
-              </div>
+            onClick={() => handleOpenProductModal(p)}
+            style={{ backgroundColor: cardColor }} 
+            className="p-3 rounded-2xl border border-white/10 flex flex-col justify-between cursor-pointer hover:border-white/20 transition">
+            <div>
+              <img src={p.image || 'https://images.unsplash.com/photo-1523275335684-37898b6baf30?w=300&auto=format&fit=crop&q=80'} alt={p.name} className="w-full h-28 rounded-xl object-cover border border-white/10 bg-gray-800 mb-2" />
+              <h3 className="font-bold text-xs truncate" style={{ color: textColor }}>{p.name}</h3>
+              <p className="text-[10px] opacity-60 line-clamp-2 h-7">{p.description}</p>
             </div>
 
-            <div className="flex justify-between items-center pt-3 mt-2 border-t" style={{ borderColor: 'rgba(255,255,255,0.1)' }}>
-              <span className="font-bold text-sm" style={{ color: textColor }}>R$ {Number(p.price).toFixed(2)}</span>
-              <button 
-                style={{ backgroundColor: primaryColor, color: buttonTextColor }}
-                className="text-[10px] font-bold px-3 py-1.5 rounded-xl shadow-md">
-                Ver Peça
+            <div className="mt-2 pt-2 border-t border-white/10 flex justify-between items-center">
+              <span className="font-bold text-xs" style={{ color: primaryColor }}>R$ {Number(p.price).toFixed(2)}</span>
+              <button style={{ backgroundColor: primaryColor, color: btnTextColor }} className="px-2.5 py-1 rounded-lg text-xs font-bold transition shadow">
+                Ver
               </button>
             </div>
           </div>
         ))}
-      </main>
+      </div>
 
-      {/* BARRA FLUTUANTE DA SACOLA */}
+      {/* BARRA DO CARRINHO FLUTUANTE */}
       {cart.length > 0 && (
         <div className="fixed bottom-4 left-4 right-4 max-w-md mx-auto z-40">
-          <button 
-            onClick={() => setIsCartOpen(true)}
-            style={{ backgroundColor: primaryColor, color: buttonTextColor }}
-            className="w-full py-4 px-5 rounded-2xl font-bold text-xs flex justify-between items-center shadow-2xl transition transform active:scale-95">
-            <span className="flex items-center space-x-2">
-              <span className="bg-black/20 px-2.5 py-1 rounded-lg text-[11px]">{cart.reduce((a, b) => a + b.quantity, 0)}</span>
-              <span>Ver Sacola de Compras</span>
-            </span>
-            <span>R$ {total.toFixed(2)} ➔</span>
+          <button
+            onClick={() => setShowCartModal(true)}
+            style={{ backgroundColor: primaryColor, color: btnTextColor }}
+            className="w-full font-bold p-3.5 rounded-2xl flex justify-between items-center shadow-2xl transition hover:opacity-95">
+            <span className="text-xs bg-black/20 px-2.5 py-1 rounded-lg">🛍️ {cart.reduce((a, b) => a + b.quantity, 0)} itens</span>
+            <span className="text-xs font-bold uppercase tracking-wider">Finalizar Compra</span>
+            <span className="text-xs font-bold">R$ {subtotal.toFixed(2)}</span>
           </button>
         </div>
       )}
 
-      {/* MODAL DE SELEÇÃO DE PRODUTO */}
+      {/* MODAL DE DETALHES DO PRODUTO */}
       {selectedProduct && (
         <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 p-4">
-          <div className="w-full max-w-sm rounded-3xl p-5 border space-y-4 max-h-[90vh] overflow-y-auto shadow-2xl" style={{ backgroundColor: cardBgColor, borderColor: 'rgba(255,255,255,0.1)', color: textColor }}>
-            <div className="w-full h-48 rounded-2xl overflow-hidden" style={{ backgroundColor: secondaryColor }}>
-              <img src={selectedProduct.image} alt={selectedProduct.name} className="w-full h-full object-cover" />
+          <div style={{ backgroundColor: cardColor, color: textColor }} className="border border-white/10 w-full max-w-sm rounded-2xl p-5 space-y-4 shadow-2xl max-h-[90vh] overflow-y-auto">
+            <div className="flex justify-between items-center border-b border-white/10 pb-2">
+              <h3 className="font-bold text-sm truncate" style={{ color: primaryColor }}>{selectedProduct.name}</h3>
+              <button onClick={() => setSelectedProduct(null)} className="opacity-60 font-bold text-xs">✕ Fechar</button>
             </div>
 
-            <div>
-              <h3 className="font-bold text-base">{selectedProduct.name}</h3>
-              <p className="text-xs opacity-75 mt-1">{selectedProduct.description}</p>
-              <span className="font-bold text-lg block mt-2" style={{ color: primaryColor }}>R$ {Number(selectedProduct.price).toFixed(2)}</span>
+            <img src={selectedProduct.image || 'https://images.unsplash.com/photo-1523275335684-37898b6baf30?w=300&auto=format&fit=crop&q=80'} alt={selectedProduct.name} className="w-full h-44 rounded-xl object-cover border border-white/10" />
+            
+            <div className="space-y-1">
+              <span className="text-lg font-bold block" style={{ color: primaryColor }}>R$ {Number(selectedProduct.price).toFixed(2)}</span>
+              <p className="text-xs opacity-70">{selectedProduct.description}</p>
             </div>
 
-            {/* SELETOR DE TAMANHO */}
-            <div className="space-y-1.5">
-              <label className="text-[11px] font-bold opacity-75 uppercase block">Selecione o Tamanho:</label>
-              <div className="grid grid-cols-5 gap-1.5">
-                {['P', 'M', 'G', 'GG', 'XGG'].map(size => (
-                  <button
-                    key={size}
-                    type="button"
-                    onClick={() => setSelectedSize(size)}
-                    style={selectedSize === size ? { backgroundColor: primaryColor, color: buttonTextColor } : { backgroundColor: secondaryColor, color: textColor, borderColor: 'rgba(255,255,255,0.1)' }}
-                    className="py-2 rounded-xl text-xs font-bold border transition">
-                    {size}
-                  </button>
-                ))}
+            {/* VARIAÇÃO OU OBSERVAÇÃO (Ex: Tamanho / Cor) */}
+            <div className="space-y-1 pt-2 border-t border-white/10">
+              <label className="text-xs font-bold block opacity-80">📐 Tamanho / Cor / Observação:</label>
+              <input
+                type="text"
+                placeholder="Ex: Tamanho M, Cor Preta..."
+                value={productNote}
+                onChange={(e) => setProductNote(e.target.value)}
+                style={{ backgroundColor: bgColor, color: textColor }}
+                className="w-full border border-white/10 p-2.5 rounded-xl text-xs focus:outline-none"
+              />
+            </div>
+
+            {/* CONTADOR DE QUANTIDADE E BOTÃO */}
+            <div className="flex items-center space-x-3 pt-2">
+              <div className="flex items-center space-x-2 bg-black/30 p-1 rounded-xl border border-white/10">
+                <button onClick={() => setProductQuantity(Math.max(1, productQuantity - 1))} className="w-8 h-8 rounded-lg bg-gray-800 text-white font-bold text-sm">-</button>
+                <span className="font-bold px-2">{productQuantity}</span>
+                <button onClick={() => setProductQuantity(productQuantity + 1)} style={{ backgroundColor: primaryColor, color: btnTextColor }} className="w-8 h-8 rounded-lg font-bold text-sm">+</button>
               </div>
-            </div>
 
-            {/* SELETOR DE QUANTIDADE */}
-            <div className="flex justify-between items-center pt-2">
-              <span className="text-xs font-bold opacity-75">Quantidade:</span>
-              <div className="flex items-center space-x-3 border p-1 rounded-xl" style={{ backgroundColor: secondaryColor, borderColor: 'rgba(255,255,255,0.1)' }}>
-                <button onClick={() => setQuantity(Math.max(1, quantity - 1))} className="w-8 h-8 rounded-lg font-bold text-sm" style={{ backgroundColor: cardBgColor }}>-</button>
-                <span className="text-xs font-bold w-4 text-center">{quantity}</span>
-                <button onClick={() => setQuantity(quantity + 1)} className="w-8 h-8 rounded-lg font-bold text-sm" style={{ backgroundColor: cardBgColor }}>+</button>
-              </div>
-            </div>
-
-            <div className="flex space-x-2 pt-2">
-              <button onClick={() => setSelectedProduct(null)} className="w-1/3 opacity-80 font-bold py-3 rounded-xl text-xs" style={{ backgroundColor: secondaryColor }}>Cancelar</button>
-              <button 
-                onClick={() => handleAddToCart(selectedProduct)}
-                style={{ backgroundColor: primaryColor, color: buttonTextColor }}
-                className="w-2/3 font-bold py-3 rounded-xl text-xs shadow-lg">
-                Adicionar à Sacola 🛍️
+              <button
+                onClick={handleAddProductToCart}
+                style={{ backgroundColor: primaryColor, color: btnTextColor }}
+                className="flex-1 font-bold py-3 rounded-xl text-xs shadow-lg transition">
+                Adicionar à Sacola • R$ {(Number(selectedProduct.price) * productQuantity).toFixed(2)}
               </button>
             </div>
           </div>
         </div>
       )}
 
-      {/* MODAL DE CHECKOUT / SACOLA */}
-      {isCartOpen && (
+      {/* MODAL DO CARRINHO */}
+      {showCartModal && (
         <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 p-4">
-          <div className="w-full max-w-md rounded-3xl p-5 border space-y-4 max-h-[90vh] overflow-y-auto shadow-2xl" style={{ backgroundColor: cardBgColor, borderColor: 'rgba(255,255,255,0.1)', color: textColor }}>
-            <div className="flex justify-between items-center border-b pb-3" style={{ borderColor: 'rgba(255,255,255,0.1)' }}>
-              <h3 className="font-bold text-sm">🛍️ Sua Sacola de Compras</h3>
-              <button onClick={() => setIsCartOpen(false)} className="text-xs font-bold opacity-75">✕ Fechar</button>
+          <div style={{ backgroundColor: cardColor, color: textColor }} className="border border-white/10 w-full max-w-sm rounded-2xl p-5 space-y-4 shadow-2xl max-h-[90vh] overflow-y-auto">
+            <div className="flex justify-between items-center border-b border-white/10 pb-2">
+              <h3 className="font-bold text-sm" style={{ color: primaryColor }}>🛍️ Sacola de Compras</h3>
+              <button onClick={() => setShowCartModal(false)} className="opacity-60 font-bold text-xs">✕ Fechar</button>
             </div>
 
-            {/* ITENS NO CARRINHO */}
-            <div className="space-y-2 max-h-40 overflow-y-auto pr-1">
+            <div className="space-y-2 max-h-48 overflow-y-auto">
               {cart.map(item => (
-                <div key={item.cartId} className="flex justify-between items-center p-3 rounded-xl text-xs border" style={{ backgroundColor: secondaryColor, borderColor: 'rgba(255,255,255,0.1)' }}>
-                  <div>
+                <div key={item.cartItemId} style={{ backgroundColor: bgColor }} className="p-2.5 rounded-xl border border-white/10 flex justify-between items-start text-xs space-x-2">
+                  <div className="flex-1">
                     <span className="font-bold block">{item.quantity}x {item.name}</span>
-                    <span className="text-[10px] font-bold" style={{ color: primaryColor }}>Tam: {item.size}</span>
+                    {item.note && (
+                      <p className="text-[10px] text-orange-400 italic">Opção: "{item.note}"</p>
+                    )}
+                    <span style={{ color: primaryColor }} className="font-bold block mt-0.5">R$ {(Number(item.price) * item.quantity).toFixed(2)}</span>
                   </div>
-                  <div className="flex items-center space-x-2">
-                    <span className="font-bold">R$ {(Number(item.price) * item.quantity).toFixed(2)}</span>
-                    <button onClick={() => removeFromCart(item.cartId)} className="text-red-400 font-bold p-1">🗑</button>
-                  </div>
+
+                  <button onClick={() => removeFromCart(item.cartItemId)} className="text-red-400 font-bold text-xs p-1">🗑</button>
                 </div>
               ))}
             </div>
 
-            {/* CUPOM DE DESCONTO */}
-            <div className="flex space-x-2">
-              <input 
-                type="text" 
-                placeholder="Possui Cupom? (Ex: PROMO10)" 
-                value={couponCode} 
-                onChange={(e) => setCouponCode(e.target.value)}
-                style={{ backgroundColor: secondaryColor, color: textColor, borderColor: 'rgba(255,255,255,0.1)' }}
-                className="flex-1 border p-2.5 rounded-xl text-xs uppercase focus:outline-none" 
-              />
-              <button onClick={handleApplyCoupon} className="px-4 py-2.5 rounded-xl font-bold text-xs border" style={{ backgroundColor: secondaryColor, borderColor: 'rgba(255,255,255,0.2)' }}>Aplicar</button>
-            </div>
-
-            {/* COPIAR PIX MANUAL */}
-            {tenant.pix_key && (
-              <div className="p-3 rounded-2xl border space-y-2 text-xs" style={{ backgroundColor: secondaryColor, borderColor: 'rgba(255,255,255,0.1)' }}>
-                <div className="flex justify-between items-center">
-                  <span className="font-bold text-green-400">🔑 Pagamento via PIX:</span>
-                  <button onClick={handleCopyPix} className="bg-green-600/20 text-green-400 border border-green-500/30 px-3 py-1 rounded-lg font-bold text-[10px]">
-                    {copiedPix ? '✓ Copiado!' : '📋 Copiar Chave PIX'}
-                  </button>
-                </div>
-                <p className="text-[10px] opacity-80 font-mono break-all p-2 rounded-xl" style={{ backgroundColor: cardBgColor }}>{tenant.pix_key}</p>
+            <form onSubmit={handleFinishOrder} className="space-y-3 pt-2 border-t border-white/10">
+              <div className="flex space-x-2">
+                <button
+                  type="button"
+                  onClick={() => setDeliveryType('ENTREGA')}
+                  style={{ 
+                    backgroundColor: deliveryType === 'ENTREGA' ? primaryColor : bgColor,
+                    color: deliveryType === 'ENTREGA' ? btnTextColor : textColor
+                  }}
+                  className="w-1/2 py-2 rounded-xl text-xs font-bold border border-white/10">
+                  🛵 Receber em Casa
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setDeliveryType('RETIRADA')}
+                  style={{ 
+                    backgroundColor: deliveryType === 'RETIRADA' ? primaryColor : bgColor,
+                    color: deliveryType === 'RETIRADA' ? btnTextColor : textColor
+                  }}
+                  className="w-1/2 py-2 rounded-xl text-xs font-bold border border-white/10">
+                  🏪 Retirar na Loja
+                </button>
               </div>
-            )}
-
-            {/* FORMULÁRIO DE ENTREGA */}
-            <form onSubmit={handleCheckout} className="space-y-3 pt-2 border-t" style={{ borderColor: 'rgba(255,255,255,0.1)' }}>
-              <input type="text" placeholder="Seu Nome Completo" value={customerName} onChange={(e) => setCustomerName(e.target.value)} style={{ backgroundColor: secondaryColor, color: textColor, borderColor: 'rgba(255,255,255,0.1)' }} className="w-full border p-3 rounded-xl text-xs focus:outline-none" required />
-              <input type="text" placeholder="Seu WhatsApp (DDD + Número)" value={customerPhone} onChange={(e) => setCustomerPhone(e.target.value)} style={{ backgroundColor: secondaryColor, color: textColor, borderColor: 'rgba(255,255,255,0.1)' }} className="w-full border p-3 rounded-xl text-xs focus:outline-none" required />
-              <input type="text" placeholder="Endereço Completo de Entrega" value={address} onChange={(e) => setAddress(e.target.value)} style={{ backgroundColor: secondaryColor, color: textColor, borderColor: 'rgba(255,255,255,0.1)' }} className="w-full border p-3 rounded-xl text-xs focus:outline-none" />
 
               <div>
-                <label className="text-[10px] font-bold opacity-75 block mb-1">Opção de Envio / Frete:</label>
-                <select 
-                  onChange={(e) => {
-                    const selected = neighborhoods.find(n => n.id === Number(e.target.value));
-                    if (selected) {
-                      setSelectedNeighFee(selected.fee);
-                      setSelectedNeighName(selected.name);
-                    } else {
-                      setSelectedNeighFee(0);
-                      setSelectedNeighName('Retirada / Combinar no Local');
-                    }
-                  }}
-                  style={{ backgroundColor: secondaryColor, color: textColor, borderColor: 'rgba(255,255,255,0.1)' }}
-                  className="w-full border p-3 rounded-xl text-xs focus:outline-none">
-                  <option value="">Retirada / Combinar no Local (R$ 0,00)</option>
-                  {neighborhoods.map(n => (
-                    <option key={n.id} value={n.id}>{n.name} — R$ {Number(n.fee).toFixed(2)}</option>
-                  ))}
+                <label className="text-[11px] opacity-70 block mb-1">Seu Nome:</label>
+                <input type="text" required value={customerName} onChange={(e) => setCustomerName(e.target.value)} style={{ backgroundColor: bgColor, color: textColor }} className="w-full border border-white/10 p-2.5 rounded-xl text-xs focus:outline-none" />
+              </div>
+
+              <div>
+                <label className="text-[11px] opacity-70 block mb-1">Seu WhatsApp:</label>
+                <input type="text" required value={customerPhone} onChange={(e) => setCustomerPhone(e.target.value)} style={{ backgroundColor: bgColor, color: textColor }} className="w-full border border-white/10 p-2.5 rounded-xl text-xs focus:outline-none" />
+              </div>
+
+              {deliveryType === 'ENTREGA' && (
+                <div>
+                  <label className="text-[11px] opacity-70 block mb-1">Endereço Completo de Entrega:</label>
+                  <input type="text" required value={customerAddress} onChange={(e) => setCustomerAddress(e.target.value)} style={{ backgroundColor: bgColor, color: textColor }} className="w-full border border-white/10 p-2.5 rounded-xl text-xs focus:outline-none" />
+                </div>
+              )}
+
+              <div>
+                <label className="text-[11px] opacity-70 block mb-1">Forma de Pagamento Preferida:</label>
+                <select value={paymentMethod} onChange={(e) => setPaymentMethod(e.target.value)} style={{ backgroundColor: bgColor, color: textColor }} className="w-full border border-white/10 p-2.5 rounded-xl text-xs focus:outline-none">
+                  <option value="PIX">PIX</option>
+                  <option value="Cartão de Crédito">Cartão de Crédito</option>
+                  <option value="Cartão de Débito">Cartão de Débito</option>
+                  <option value="Dinheiro">Dinheiro</option>
                 </select>
               </div>
 
-              {/* RESUMO FINANCEIRO */}
-              <div className="p-3 rounded-2xl space-y-1 text-xs border" style={{ backgroundColor: secondaryColor, borderColor: 'rgba(255,255,255,0.1)' }}>
-                <div className="flex justify-between opacity-80"><span>Subtotal:</span><span>R$ {subtotal.toFixed(2)}</span></div>
-                {discountAmount > 0 && <div className="flex justify-between text-green-400"><span>Desconto:</span><span>-R$ {discountAmount.toFixed(2)}</span></div>}
-                <div className="flex justify-between opacity-80"><span>Frete:</span><span>R$ {deliveryFee.toFixed(2)}</span></div>
-                <div className="flex justify-between font-bold text-sm pt-1 border-t" style={{ borderColor: 'rgba(255,255,255,0.1)' }}><span>TOTAL:</span><span className="text-green-400">R$ {total.toFixed(2)}</span></div>
+              <div style={{ backgroundColor: bgColor }} className="p-3 rounded-xl border border-white/10 space-y-1 text-xs">
+                <div className="flex justify-between"><span className="opacity-60">Subtotal:</span><span>R$ {subtotal.toFixed(2)}</span></div>
+                <div className="flex justify-between"><span className="opacity-60">Taxa de Frete/Envio:</span><span>R$ {currentFee.toFixed(2)}</span></div>
+                <div className="flex justify-between font-bold text-sm pt-1 border-t border-white/10"><span style={{ color: primaryColor }}>TOTAL:</span><span style={{ color: primaryColor }}>R$ {total.toFixed(2)}</span></div>
               </div>
 
-              <button 
-                type="submit" 
-                style={{ backgroundColor: primaryColor, color: buttonTextColor }}
-                className="w-full font-bold py-3.5 rounded-xl text-xs shadow-lg transition transform active:scale-95">
-                Enviar Pedido no WhatsApp 🚀
+              <button
+                type="submit"
+                disabled={isSubmitting}
+                style={{ backgroundColor: primaryColor, color: btnTextColor }}
+                className="w-full font-bold py-3.5 rounded-xl text-xs shadow-lg transition hover:opacity-90">
+                {isSubmitting ? 'Enviando...' : 'Finalizar Pedido no WhatsApp 🚀'}
               </button>
             </form>
           </div>
         </div>
       )}
-
     </div>
   );
 }
