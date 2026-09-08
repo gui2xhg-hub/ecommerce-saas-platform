@@ -85,6 +85,7 @@ export default function AdminTenant() {
       whatsapp: cleanWhatsapp,
       logo_url: tenant.logo_url || '',
       banner_url: tenant.banner_url || '',
+      instagram_url: tenant.instagram_url || '',
       primary_color: tenant.primary_color || '#3B82F6',
       secondary_color: tenant.secondary_color || '#090D16',
       admin_password: tenant.admin_password || ''
@@ -107,6 +108,23 @@ export default function AdminTenant() {
     } else {
       alert("Configurações salvas com sucesso!");
       fetchData();
+    }
+  };
+
+  // LIMPAR HISTÓRICO DE PEDIDOS / ZERAR TESTES FINANCEIROS
+  const handleClearFinancialData = async () => {
+    if (confirm("⚠️ ATENÇÃO: Tem certeza que deseja zerar TODOS os pedidos e dados financeiros?\n\nEsta ação vai apagar definitivamente todos os pedidos de teste do banco de dados. Não poderá ser desfeito!")) {
+      const { error } = await supabase
+        .from('orders')
+        .delete()
+        .eq('tenant_id', tenant.id);
+
+      if (error) {
+        alert("Erro ao limpar financeiro: " + error.message);
+      } else {
+        alert("Histórico financeiro e pedidos zerados com sucesso!");
+        fetchData();
+      }
     }
   };
 
@@ -515,6 +533,20 @@ export default function AdminTenant() {
               )}
             </div>
           </section>
+
+          {/* BOTÃO PARA ZERAR DADOS E APAGAR TESTES */}
+          <section className="bg-gray-900 p-4 rounded-2xl border border-red-500/30 flex justify-between items-center mt-4">
+            <div>
+              <h4 className="font-bold text-xs text-red-400">🧹 Zerar Dados de Teste</h4>
+              <p className="text-[10px] text-gray-400">Apaga todo o histórico de pedidos para recomeçar do zero.</p>
+            </div>
+            <button
+              type="button"
+              onClick={handleClearFinancialData}
+              className="bg-red-500/20 hover:bg-red-500/40 text-red-400 border border-red-500/40 px-3 py-2 rounded-xl text-xs font-bold transition">
+              🗑️ Limpar
+            </button>
+          </section>
         </div>
       )}
 
@@ -527,6 +559,18 @@ export default function AdminTenant() {
               <div>
                 <label className="text-[11px] text-gray-400 block mb-1">Nome da Loja:</label>
                 <input type="text" value={tenant.name || ''} className="w-full bg-gray-950 border border-gray-800 p-3 rounded-xl text-xs text-white focus:outline-none" onChange={(e) => setTenant({ ...tenant, name: e.target.value })} />
+              </div>
+
+              {/* CAMPO DE LINK DO INSTAGRAM */}
+              <div>
+                <label className="text-[11px] text-gray-400 block mb-1">Link do Instagram:</label>
+                <input 
+                  type="text" 
+                  placeholder="Ex: https://instagram.com/minhaloja" 
+                  value={tenant.instagram_url || ''} 
+                  className="w-full bg-gray-950 border border-gray-800 p-3 rounded-xl text-xs text-white focus:outline-none" 
+                  onChange={(e) => setTenant({ ...tenant, instagram_url: e.target.value })} 
+                />
               </div>
 
               <div>
