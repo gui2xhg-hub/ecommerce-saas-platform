@@ -25,7 +25,7 @@ export default function EcommerceCliente() {
   // CARRINHO E CHECKOUT
   const [cart, setCart] = useState([]);
   const [showCartModal, setShowCartModal] = useState(false);
-  const [deliveryType, setDeliveryType] = useState('ENTREGA'); // 'ENTREGA' ou 'RETIRADA'
+  const [deliveryType, setDeliveryType] = useState('ENTREGA');
   const [customerName, setCustomerName] = useState('');
   const [customerPhone, setCustomerPhone] = useState('');
   const [customerAddress, setCustomerAddress] = useState('');
@@ -55,7 +55,6 @@ export default function EcommerceCliente() {
     if (tData) {
       setTenant(tData);
 
-      // CARREGA PIXEL DO META
       if (tData.pixel_id && typeof window !== 'undefined') {
         !(function (f, b, e, v, n, t, s) {
           if (f.fbq) return; n = f.fbq = function () { n.callMethod ? n.callMethod.apply(n, arguments) : n.queue.push(arguments); };
@@ -161,7 +160,15 @@ export default function EcommerceCliente() {
   const currentFee = deliveryType === 'RETIRADA' ? 0 : (isFreeShipping ? 0 : defaultFee);
   const total = subtotal + currentFee;
 
-  const filteredProducts = selectedCat === 'ALL' ? products : products.filter(p => String(p.category_id) === String(selectedCat));
+  // FILTRAGEM COM SUPORTE PARA A ABA 'OFFERS' (🔥 PROMOÇÕES)
+  const promoProductsCount = products.filter(p => p.original_price && Number(p.original_price) > Number(p.price)).length;
+  
+  const filteredProducts = selectedCat === 'ALL' 
+    ? products 
+    : (selectedCat === 'OFFERS' 
+        ? products.filter(p => p.original_price && Number(p.original_price) > Number(p.price))
+        : products.filter(p => String(p.category_id) === String(selectedCat))
+      );
 
   const promoBannerList = tenant.promo_banners ? tenant.promo_banners.split(',').map(b => b.trim()).filter(Boolean) : [];
 
@@ -251,6 +258,9 @@ export default function EcommerceCliente() {
     ? selectedProduct.images_json
     : (selectedProduct?.image ? [selectedProduct.image] : []);
 
+  const selectedProductHasPromo = selectedProduct && selectedProduct.original_price && Number(selectedProduct.original_price) > Number(selectedProduct.price);
+  const selectedProductSavings = selectedProductHasPromo ? (Number(selectedProduct.original_price) - Number(selectedProduct.price)) : 0;
+
   return (
     <div className="min-h-screen font-sans pb-24 max-w-md mx-auto transition-colors duration-300" style={{ backgroundColor: bgColor, color: textColor }}>
       {/* CAPA DA LOJA */}
@@ -287,7 +297,7 @@ export default function EcommerceCliente() {
         </div>
       )}
 
-      {/* CATEGORIAS */}
+      {/* CATEGORIAS + ABA DE PROMOÇÕES 🔥 */}
       <div className={`${promoBannerList.length > 0 ? 'mt-4' : 'mt-8'} px-4`}>
         <div className="flex space-x-2 overflow-x-auto pb-2 scrollbar-none">
           <button
@@ -299,6 +309,20 @@ export default function EcommerceCliente() {
             className="px-3.5 py-1.5 rounded-full text-xs font-bold whitespace-nowrap border border-white/10 transition">
             Todos
           </button>
+
+          {/* BOTÃO ESPECIAL DE PROMOÇÕES */}
+          {promoProductsCount > 0 && (
+            <button
+              onClick={() => setSelectedCat('OFFERS')}
+              className={`px-3.5 py-1.5 rounded-full text-xs font-bold whitespace-nowrap border transition flex items-center space-x-1 ${
+                selectedCat === 'OFFERS' 
+                  ? 'bg-gradient-to-r from-red-600 to-orange-500 text-white border-red-500 shadow-lg' 
+                  : 'bg-red-500/10 text-red-400 border-red-500/30 hover:bg-red-500/20'
+              }`}>
+              <span>🔥 Promoções ({promoProductsCount})</span>
+            </button>
+          )}
+
           {categories.map(c => {
             const isSelected = String(selectedCat) === String(c.id);
             return (
@@ -319,26 +343,51 @@ export default function EcommerceCliente() {
 
       {/* GRID DE PRODUTOS */}
       <div className="mt-4 px-4 grid grid-cols-2 gap-3">
-        {filteredProducts.map(p => (
-          <div 
-            key={p.id} 
-            onClick={() => handleOpenProductModal(p)}
-            style={{ backgroundColor: cardColor }} 
-            className="p-3 rounded-2xl border border-white/10 flex flex-col justify-between cursor-pointer hover:border-white/20 transition">
-            <div>
-              <img src={p.image || 'https://images.unsplash.com/photo-1523275335684-37898b6baf30?w=300&auto=format&fit=crop&q=80'} alt={p.name} className="w-full h-28 rounded-xl object-cover border border-white/10 bg-gray-800 mb-2" />
-              <h3 className="font-bold text-xs line-clamp-2 leading-snug h-8" style={{ color: textColor }}>{p.name}</h3>
-              <p className="text-[10px] opacity-60 line-clamp-2 h-7 mt-1">{p.description}</p>
-            </div>
+        {filteredProducts.map(p => {
+          const hasPromo = p.original_price && Number(p.original_price) > Number(p.price);
+          const discPercent = hasPromo ? Math.round(((Number(p.original_price) - Number(p.price)) / Number(p.original_price)) * 100) : 0;
 
-            <div className="mt-2 pt-2 border-t border-white/10 flex justify-between items-center">
-              <span className="font-bold text-xs" style={{ color: primaryColor }}>R$ {Number(p.price).toFixed(2)}</span>
-              <button style={{ backgroundColor: primaryColor, color: btnTextColor }} className="px-2.5 py-1 rounded-lg text-xs font-bold transition shadow">
-                Ver Produto
-              </button>
+          return (
+            <div 
+              key={p.id} 
+              onClick={() => handleOpenProductModal(p)}
+              style={{ backgroundColor: cardColor }} 
+              className="p-3 rounded-2xl border border-white/10 flex flex-col justify-between cursor-pointer hover:border-white/20 transition relative group">
+              
+              {/* BADGE DE PROMOÇÃO NO CARD */}
+              {hasPromo && (
+                <div className="absolute top-2.5 right-2.5 z-10 bg-gradient-to-r from-red-600 to-orange-500 text-white font-extrabold text-[9px] px-2 py-0.5 rounded-full shadow-lg border border-white/20 uppercase tracking-wider animate-pulse">
+                  -{discPercent}% OFF
+                </div>
+              )}
+
+              <div>
+                <div className="relative overflow-hidden rounded-xl mb-2">
+                  <img src={p.image || 'https://images.unsplash.com/photo-1523275335684-37898b6baf30?w=300&auto=format&fit=crop&q=80'} alt={p.name} className="w-full h-28 object-cover border border-white/10 bg-gray-800" />
+                </div>
+                <h3 className="font-bold text-xs line-clamp-2 leading-snug h-8" style={{ color: textColor }}>{p.name}</h3>
+                <p className="text-[10px] opacity-60 line-clamp-2 h-7 mt-1">{p.description}</p>
+              </div>
+
+              <div className="mt-2 pt-2 border-t border-white/10 flex justify-between items-end">
+                <div>
+                  {hasPromo && (
+                    <span className="text-[10px] opacity-50 line-through block leading-tight">
+                      R$ {Number(p.original_price).toFixed(2)}
+                    </span>
+                  )}
+                  <span className={`font-bold text-xs block ${hasPromo ? 'text-red-400 font-extrabold' : ''}`} style={{ color: hasPromo ? '#f87171' : primaryColor }}>
+                    R$ {Number(p.price).toFixed(2)}
+                  </span>
+                </div>
+
+                <button style={{ backgroundColor: primaryColor, color: btnTextColor }} className="px-2 py-1 rounded-lg text-[10px] font-bold transition shadow shrink-0">
+                  Ver
+                </button>
+              </div>
             </div>
-          </div>
-        ))}
+          );
+        })}
       </div>
 
       {/* BARRA DO CARRINHO FLUTUANTE */}
@@ -360,11 +409,25 @@ export default function EcommerceCliente() {
         <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 p-4">
           <div style={{ backgroundColor: cardColor, color: textColor }} className="border border-white/10 w-full max-w-sm rounded-2xl p-5 space-y-4 shadow-2xl max-h-[90vh] overflow-y-auto">
             <div className="flex justify-between items-start border-b border-white/10 pb-2 gap-2">
-              <h3 className="font-bold text-sm leading-snug flex-1" style={{ color: primaryColor }}>{selectedProduct.name}</h3>
+              <div className="flex-1">
+                <h3 className="font-bold text-sm leading-snug" style={{ color: primaryColor }}>{selectedProduct.name}</h3>
+                {selectedProductHasPromo && (
+                  <span className="inline-block bg-red-500/20 text-red-400 border border-red-500/30 text-[10px] font-bold px-2 py-0.5 rounded-md mt-1">
+                    🔥 OFERTA ESPECIAL — ECONOMIZE R$ {selectedProductSavings.toFixed(2)}
+                  </span>
+                )}
+              </div>
               <button onClick={() => setSelectedProduct(null)} className="opacity-60 hover:opacity-100 font-bold text-xs shrink-0 pt-0.5">✕ Fechar</button>
             </div>
 
-            <img src={activeImage} alt={selectedProduct.name} className="w-full h-44 rounded-xl object-cover border border-white/10 bg-gray-900" />
+            <div className="relative">
+              <img src={activeImage} alt={selectedProduct.name} className="w-full h-44 rounded-xl object-cover border border-white/10 bg-gray-900" />
+              {selectedProductHasPromo && (
+                <span className="absolute top-2 right-2 bg-gradient-to-r from-red-600 to-orange-500 text-white font-extrabold text-xs px-2.5 py-1 rounded-full shadow-lg border border-white/20">
+                  -{Math.round(((Number(selectedProduct.original_price) - Number(selectedProduct.price)) / Number(selectedProduct.original_price)) * 100)}% OFF
+                </span>
+              )}
+            </div>
             
             {productGallery.length > 1 && (
               <div className="flex space-x-2 overflow-x-auto pb-1 scrollbar-none">
@@ -382,7 +445,16 @@ export default function EcommerceCliente() {
             )}
 
             <div className="space-y-1">
-              <span className="text-lg font-bold block" style={{ color: primaryColor }}>R$ {Number(selectedProduct.price).toFixed(2)}</span>
+              <div className="flex items-baseline space-x-2">
+                <span className="text-xl font-extrabold block" style={{ color: selectedProductHasPromo ? '#f87171' : primaryColor }}>
+                  R$ {Number(selectedProduct.price).toFixed(2)}
+                </span>
+                {selectedProductHasPromo && (
+                  <span className="text-xs text-gray-500 line-through">
+                    R$ {Number(selectedProduct.original_price).toFixed(2)}
+                  </span>
+                )}
+              </div>
               <p className="text-xs opacity-70">{selectedProduct.description}</p>
             </div>
 
@@ -475,7 +547,6 @@ export default function EcommerceCliente() {
               <button onClick={() => setShowCartModal(false)} className="opacity-60 font-bold text-xs">✕ Fechar</button>
             </div>
 
-            {/* BANNER DE PROGRESSO DO FRETE GRÁTIS */}
             {freeThreshold > 0 && (
               <div 
                 className="text-[11px] p-2.5 rounded-xl font-bold text-center border transition"
@@ -512,7 +583,6 @@ export default function EcommerceCliente() {
             </div>
 
             <form onSubmit={handleFinishOrder} className="space-y-3 pt-2 border-t border-white/10">
-              {/* OPÇÕES DE ENTREGA AUTOMÁTICAS */}
               <div className="flex space-x-2">
                 <button
                   type="button"
