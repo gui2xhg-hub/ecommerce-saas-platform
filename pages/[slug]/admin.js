@@ -20,6 +20,11 @@ export default function AdminTenant() {
   const [allOrders, setAllOrders] = useState([]);
   const [reportFilter, setReportFilter] = useState('all');
 
+  // CONFIGURAÇÕES AUTOMÁTICAS DE FRETE
+  const [defaultShippingFee, setDefaultShippingFee] = useState(10.00);
+  const [freeShippingThreshold, setFreeShippingThreshold] = useState(0.00);
+  const [enablePickup, setEnablePickup] = useState(true);
+
   // FORMULÁRIOS E EDIÇÃO
   const [newProd, setNewProd] = useState({ 
     name: '', 
@@ -54,7 +59,12 @@ export default function AdminTenant() {
 
   const fetchTenant = async () => {
     const { data: tData } = await supabase.from('tenants').select('*').eq('slug', slug).single();
-    if (tData) setTenant(tData);
+    if (tData) {
+      setTenant(tData);
+      setDefaultShippingFee(tData.default_shipping_fee ?? 10.00);
+      setFreeShippingThreshold(tData.free_shipping_threshold ?? 0.00);
+      setEnablePickup(tData.enable_pickup ?? true);
+    }
     setLoading(false);
   };
 
@@ -83,7 +93,12 @@ export default function AdminTenant() {
 
     const { data: oData } = await supabase.from('orders').select('*').eq('tenant_id', tenantId).order('created_at', { ascending: false });
 
-    if (tData) setTenant(tData);
+    if (tData) {
+      setTenant(tData);
+      setDefaultShippingFee(tData.default_shipping_fee ?? 10.00);
+      setFreeShippingThreshold(tData.free_shipping_threshold ?? 0.00);
+      setEnablePickup(tData.enable_pickup ?? true);
+    }
     if (cData && cData.length > 0) {
       setCategories(cData);
       setNewProd(prev => ({ ...prev, category_id: prev.category_id || cData[0].id }));
@@ -107,7 +122,10 @@ export default function AdminTenant() {
       primary_color: tenant.primary_color || '#3B82F6',
       secondary_color: tenant.secondary_color || '#090D16',
       admin_password: tenant.admin_password || '',
-      niche: tenant.niche || 'general'
+      niche: tenant.niche || 'general',
+      default_shipping_fee: Number(defaultShippingFee),
+      free_shipping_threshold: Number(freeShippingThreshold),
+      enable_pickup: enablePickup
     };
 
     if ('pix_key' in tenant) updatePayload.pix_key = tenant.pix_key || '';
@@ -130,7 +148,6 @@ export default function AdminTenant() {
     }
   };
 
-  // LIMPAR HISTÓRICO DE PEDIDOS / ZERAR TESTES FINANCEIROS
   const handleClearFinancialData = async () => {
     if (confirm("⚠️ ATENÇÃO: Tem certeza que deseja zerar TODOS os pedidos e dados financeiros?\n\nEsta ação vai apagar definitivamente todos os pedidos de teste do banco de dados. Não poderá ser desfeito!")) {
       const { error } = await supabase
@@ -147,7 +164,6 @@ export default function AdminTenant() {
     }
   };
 
-  // GERENCIAMENTO DE IMAGENS (NOVO PRODUTO)
   const handleAddImageToNewProd = () => {
     if (!tempImageUrl.trim()) return alert("Insira a URL da imagem!");
     const url = tempImageUrl.trim();
@@ -170,7 +186,6 @@ export default function AdminTenant() {
     });
   };
 
-  // GERENCIAMENTO DE IMAGENS (EDITAR PRODUTO)
   const handleAddImageToEditProd = () => {
     if (!tempEditImageUrl.trim()) return alert("Insira a URL da imagem!");
     const url = tempEditImageUrl.trim();
@@ -193,7 +208,6 @@ export default function AdminTenant() {
     });
   };
 
-  // LÓGICA DE GERAR VARIAÇÕES (NOVO PRODUTO)
   const handleAddVariationToNewProd = () => {
     if (!tempVarName.trim() || !tempVarOptions.trim()) return alert("Preencha o nome do atributo e as opções!");
     const optsArray = tempVarOptions.split(',').map(s => s.trim()).filter(Boolean);
@@ -210,7 +224,6 @@ export default function AdminTenant() {
     }));
   };
 
-  // LÓGICA DE GERAR VARIAÇÕES (EDITAR PRODUTO)
   const handleAddVariationToEditProd = () => {
     if (!tempEditVarName.trim() || !tempEditVarOptions.trim()) return alert("Preencha o nome do atributo e as opções!");
     const optsArray = tempEditVarOptions.split(',').map(s => s.trim()).filter(Boolean);
@@ -227,7 +240,6 @@ export default function AdminTenant() {
     }));
   };
 
-  // MANIPULAÇÃO DE PRODUTOS
   const handleAddProduct = async (e) => {
     e.preventDefault();
     if (!newProd.name || !newProd.price) return alert("Preencha nome e preço!");
@@ -292,7 +304,6 @@ export default function AdminTenant() {
     }
   };
 
-  // MANIPULAÇÃO DE CUPONS
   const handleAddCoupon = async (e) => {
     e.preventDefault();
     if (!newCoupon.code || !newCoupon.discount_value) return alert("Preencha o código e o valor do desconto!");
@@ -315,7 +326,6 @@ export default function AdminTenant() {
     }
   };
 
-  // MANIPULAÇÃO DE FRETES
   const handleAddNeighborhood = async (e) => {
     e.preventDefault();
     const formattedFee = parseFloat(String(newNeigh.fee).replace(',', '.'));
@@ -332,7 +342,6 @@ export default function AdminTenant() {
     fetchData();
   };
 
-  // MANIPULAÇÃO DE COLEÇÕES / CATEGORIAS
   const handleAddCategory = async (e) => {
     e.preventDefault();
     if (!newCatName.trim()) return;
@@ -348,7 +357,6 @@ export default function AdminTenant() {
     fetchData();
   };
 
-  // RELATÓRIOS
   const getFilteredOrders = () => {
     const now = new Date();
     return allOrders.filter(o => {
@@ -491,7 +499,6 @@ export default function AdminTenant() {
                 </select>
               </div>
 
-              {/* BLOCO DE MULTÍPLAS FOTOS / GALERIA */}
               <div className="bg-gray-950 p-3.5 rounded-2xl border border-gray-800 space-y-3">
                 <label className="text-xs font-bold text-blue-400 block">🖼️ Galeria de Fotos do Produto</label>
                 <div className="flex space-x-2">
@@ -510,7 +517,6 @@ export default function AdminTenant() {
                   </button>
                 </div>
 
-                {/* MINIATURAS DAS IMAGENS ADICIONADAS */}
                 {newProd.images_json && newProd.images_json.length > 0 && (
                   <div className="flex flex-wrap gap-2 pt-2 border-t border-gray-800">
                     {newProd.images_json.map((imgUrl, idx) => (
@@ -529,7 +535,6 @@ export default function AdminTenant() {
                 )}
               </div>
 
-              {/* BLOCO DE VARIAÇÕES DINÂMICAS */}
               <div className="bg-gray-950 p-3.5 rounded-2xl border border-gray-800 space-y-3">
                 <label className="text-xs font-bold text-blue-400 block">⚡ Variações / Opções do Produto (Opcional)</label>
                 <p className="text-[10px] text-gray-400">Ex: Atributo: <b>Voltagem</b> | Opções: <b>110V, 220V</b> ou Atributo: <b>Tamanho</b> | Opções: <b>P, M, G</b></p>
@@ -557,7 +562,6 @@ export default function AdminTenant() {
                   + Adicionar Variação
                 </button>
 
-                {/* LISTA DE VARIAÇÕES ADICIONADAS */}
                 {newProd.variations_json && newProd.variations_json.length > 0 && (
                   <div className="space-y-1.5 pt-2 border-t border-gray-800">
                     {newProd.variations_json.map((v, idx) => (
@@ -655,7 +659,7 @@ export default function AdminTenant() {
       {activeTab === 'neighborhoods' && (
         <div className="space-y-6">
           <section className="bg-gray-900 p-5 rounded-3xl border border-gray-800 space-y-4 shadow-xl">
-            <h3 className="font-bold text-sm text-blue-400">🚚 Nova Opção de Frete / Envio</h3>
+            <h3 className="font-bold text-sm text-blue-400">🚚 Nova Opção de Frete / Envio por Bairro</h3>
             <form onSubmit={handleAddNeighborhood} className="space-y-3">
               <input type="text" placeholder="Nome (Ex: SEDEX SP, PAC Brasil, Frete Fixo R$ 20)" value={newNeigh.name} className="w-full bg-gray-950 border border-gray-800 p-3 rounded-xl text-xs text-white focus:outline-none" onChange={(e) => setNewNeigh({ ...newNeigh, name: e.target.value })} />
               <input type="text" placeholder="Taxa de Envio R$ Ex: 20.00" value={newNeigh.fee} className="w-full bg-gray-950 border border-gray-800 p-3 rounded-xl text-xs text-white focus:outline-none" onChange={(e) => setNewNeigh({ ...newNeigh, fee: e.target.value })} />
@@ -745,7 +749,6 @@ export default function AdminTenant() {
             </div>
           </section>
 
-          {/* BOTÃO PARA ZERAR DADOS E APAGAR TESTES */}
           <section className="bg-gray-900 p-4 rounded-2xl border border-red-500/30 flex justify-between items-center mt-4">
             <div>
               <h4 className="font-bold text-xs text-red-400">🧹 Zerar Dados de Teste</h4>
@@ -770,6 +773,51 @@ export default function AdminTenant() {
               <div>
                 <label className="text-[11px] text-gray-400 block mb-1">Nome da Loja:</label>
                 <input type="text" value={tenant.name || ''} className="w-full bg-gray-950 border border-gray-800 p-3 rounded-xl text-xs text-white focus:outline-none" onChange={(e) => setTenant({ ...tenant, name: e.target.value })} />
+              </div>
+
+              {/* REGRAS AUTOMÁTICAS DE FRETE E ENVIO */}
+              <div className="bg-gray-950 p-4 rounded-2xl border border-orange-500/30 space-y-3">
+                <h4 className="font-bold text-xs text-orange-400 flex items-center space-x-1">
+                  <span>🛵 Configurações Automáticas de Frete & Envio</span>
+                </h4>
+
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                  <div>
+                    <label className="text-[11px] text-gray-400 block mb-1">Taxa Padrão de Entrega (R$):</label>
+                    <input
+                      type="number"
+                      step="0.01"
+                      value={defaultShippingFee}
+                      onChange={(e) => setDefaultShippingFee(e.target.value)}
+                      className="w-full bg-gray-900 border border-gray-800 p-2.5 rounded-xl text-xs text-white focus:outline-none"
+                      placeholder="10.00"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="text-[11px] text-gray-400 block mb-1">Valor p/ Frete Grátis (R$):</label>
+                    <input
+                      type="number"
+                      step="0.01"
+                      value={freeShippingThreshold}
+                      onChange={(e) => setFreeShippingThreshold(e.target.value)}
+                      className="w-full bg-gray-900 border border-gray-800 p-2.5 rounded-xl text-xs text-white focus:outline-none"
+                      placeholder="0.00"
+                    />
+                    <span className="text-[9px] text-gray-500 block mt-0.5">(0 = sem regra de frete grátis)</span>
+                  </div>
+
+                  <div>
+                    <label className="text-[11px] text-gray-400 block mb-1">Permitir Retirada?</label>
+                    <select
+                      value={enablePickup ? 'SIM' : 'NAO'}
+                      onChange={(e) => setEnablePickup(e.target.value === 'SIM')}
+                      className="w-full bg-gray-900 border border-gray-800 p-2.5 rounded-xl text-xs text-white focus:outline-none">
+                      <option value="SIM">Sim (Cliente pode retirar)</option>
+                      <option value="NAO">Não (Apenas Entrega)</option>
+                    </select>
+                  </div>
+                </div>
               </div>
 
               {/* NICHO DA LOJA */}
@@ -931,7 +979,6 @@ export default function AdminTenant() {
         </div>
       )}
 
-      {/* MODAL EDITAR PRODUTO COM VARIAÇÕES E FOTOS */}
       {editingProduct && (
         <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 p-4">
           <form onSubmit={handleUpdateProduct} className="bg-gray-900 w-full max-w-sm rounded-3xl p-5 border border-blue-500/40 space-y-3 max-h-[90vh] overflow-y-auto shadow-2xl">
@@ -946,7 +993,6 @@ export default function AdminTenant() {
               </select>
             </div>
 
-            {/* FOTOS NO MODAL DE EDIÇÃO */}
             <div className="bg-gray-950 p-3.5 rounded-2xl border border-gray-800 space-y-3">
               <label className="text-xs font-bold text-blue-400 block">🖼️ Galeria de Fotos do Produto</label>
               <div className="flex space-x-2">
@@ -983,7 +1029,6 @@ export default function AdminTenant() {
               )}
             </div>
 
-            {/* EDIÇÃO DE VARIAÇÕES */}
             <div className="bg-gray-950 p-3.5 rounded-2xl border border-gray-800 space-y-3">
               <label className="text-xs font-bold text-blue-400 block">⚡ Variações / Opções do Produto</label>
               
