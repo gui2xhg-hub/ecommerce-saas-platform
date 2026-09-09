@@ -15,8 +15,9 @@ export default function EcommerceCliente() {
   // LISTA DE TAMANHOS DE ROUPA PADRÃO (FALLBACK PARA VESTUÁRIO/FASHION)
   const DEFAULT_FASHION_SIZES = ['P', 'M', 'G', 'GG', 'XG'];
 
-  // MODAL DE DETALHES DO PRODUTO (VARIAÇÕES DINÂMICAS E OBSERVAÇÃO)
+  // MODAL DE DETALHES DO PRODUTO (GALERIA, VARIAÇÕES DINÂMICAS E OBSERVAÇÃO)
   const [selectedProduct, setSelectedProduct] = useState(null);
+  const [activeImage, setActiveImage] = useState('');
   const [selectedVariations, setSelectedVariations] = useState({});
   const [productQuantity, setProductQuantity] = useState(1);
   const [productNote, setProductNote] = useState('');
@@ -73,6 +74,12 @@ export default function EcommerceCliente() {
     setProductQuantity(1);
     setProductNote('');
 
+    // CARREGA A GALERIA DE FOTOS OU DEFINE A IMAGEM PADRÃO
+    const gallery = product.images_json && Array.isArray(product.images_json) && product.images_json.length > 0 
+      ? product.images_json 
+      : [product.image];
+    setActiveImage(gallery[0] || 'https://images.unsplash.com/photo-1523275335684-37898b6baf30?w=300&auto=format&fit=crop&q=80');
+
     // INICIALIZA VARIAÇÕES DINÂMICAS OU FALLBACK DE ROUPAS
     const initialVars = {};
     if (product.variations_json && Array.isArray(product.variations_json) && product.variations_json.length > 0) {
@@ -112,7 +119,7 @@ export default function EcommerceCliente() {
       price: Number(selectedProduct.price),
       quantity: productQuantity,
       note: productNote,
-      image: selectedProduct.image
+      image: activeImage || selectedProduct.image
     };
 
     setCart([...cart, cartItem]);
@@ -195,6 +202,11 @@ export default function EcommerceCliente() {
   // VERIFICA SE O PRODUTO SELECIONADO TEM VARIAÇÕES
   const hasCustomVariations = selectedProduct?.variations_json && Array.isArray(selectedProduct.variations_json) && selectedProduct.variations_json.length > 0;
   const isFashionFallback = !hasCustomVariations && (tenant?.niche === 'fashion' || !tenant?.niche);
+
+  // EXTRAI GALERIA DE FOTOS PARA O MODAL
+  const productGallery = selectedProduct?.images_json && Array.isArray(selectedProduct.images_json) && selectedProduct.images_json.length > 0
+    ? selectedProduct.images_json
+    : (selectedProduct?.image ? [selectedProduct.image] : []);
 
   return (
     <div className="min-h-screen font-sans pb-24 max-w-md mx-auto transition-colors duration-300" style={{ backgroundColor: bgColor, color: textColor }}>
@@ -301,7 +313,7 @@ export default function EcommerceCliente() {
         </div>
       )}
 
-      {/* MODAL DE DETALHES DO PRODUTO / VARIAÇÕES DINÂMICAS */}
+      {/* MODAL DE DETALHES DO PRODUTO / GALERIA E VARIAÇÕES DINÂMICAS */}
       {selectedProduct && (
         <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 p-4">
           <div style={{ backgroundColor: cardColor, color: textColor }} className="border border-white/10 w-full max-w-sm rounded-2xl p-5 space-y-4 shadow-2xl max-h-[90vh] overflow-y-auto">
@@ -310,8 +322,25 @@ export default function EcommerceCliente() {
               <button onClick={() => setSelectedProduct(null)} className="opacity-60 hover:opacity-100 font-bold text-xs shrink-0 pt-0.5">✕ Fechar</button>
             </div>
 
-            <img src={selectedProduct.image || 'https://images.unsplash.com/photo-1523275335684-37898b6baf30?w=300&auto=format&fit=crop&q=80'} alt={selectedProduct.name} className="w-full h-44 rounded-xl object-cover border border-white/10" />
+            {/* FOTO PRINCIPAL / DESTACADA */}
+            <img src={activeImage} alt={selectedProduct.name} className="w-full h-44 rounded-xl object-cover border border-white/10 bg-gray-900" />
             
+            {/* GALERIA DE MINIATURAS (SE HOUVER MAIS DE 1 FOTO) */}
+            {productGallery.length > 1 && (
+              <div className="flex space-x-2 overflow-x-auto pb-1 scrollbar-none">
+                {productGallery.map((imgUrl, idx) => (
+                  <button
+                    key={idx}
+                    type="button"
+                    onClick={() => setActiveImage(imgUrl)}
+                    style={{ borderColor: activeImage === imgUrl ? primaryColor : 'rgba(255,255,255,0.1)' }}
+                    className={`w-12 h-12 rounded-lg border-2 overflow-hidden shrink-0 transition ${activeImage === imgUrl ? 'scale-105' : 'opacity-60'}`}>
+                    <img src={imgUrl} alt={`Foto ${idx + 1}`} className="w-full h-full object-cover" />
+                  </button>
+                ))}
+              </div>
+            )}
+
             <div className="space-y-1">
               <span className="text-lg font-bold block" style={{ color: primaryColor }}>R$ {Number(selectedProduct.price).toFixed(2)}</span>
               <p className="text-xs opacity-70">{selectedProduct.description}</p>
