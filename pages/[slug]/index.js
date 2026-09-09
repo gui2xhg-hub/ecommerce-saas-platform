@@ -273,8 +273,8 @@ export default function EcommerceCliente() {
             className="p-3 rounded-2xl border border-white/10 flex flex-col justify-between cursor-pointer hover:border-white/20 transition">
             <div>
               <img src={p.image || 'https://images.unsplash.com/photo-1523275335684-37898b6baf30?w=300&auto=format&fit=crop&q=80'} alt={p.name} className="w-full h-28 rounded-xl object-cover border border-white/10 bg-gray-800 mb-2" />
-              <h3 className="font-bold text-xs truncate" style={{ color: textColor }}>{p.name}</h3>
-              <p className="text-[10px] opacity-60 line-clamp-2 h-7">{p.description}</p>
+              <h3 className="font-bold text-xs line-clamp-2 leading-snug h-8" style={{ color: textColor }}>{p.name}</h3>
+              <p className="text-[10px] opacity-60 line-clamp-2 h-7 mt-1">{p.description}</p>
             </div>
 
             <div className="mt-2 pt-2 border-t border-white/10 flex justify-between items-center">
@@ -305,9 +305,9 @@ export default function EcommerceCliente() {
       {selectedProduct && (
         <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 p-4">
           <div style={{ backgroundColor: cardColor, color: textColor }} className="border border-white/10 w-full max-w-sm rounded-2xl p-5 space-y-4 shadow-2xl max-h-[90vh] overflow-y-auto">
-            <div className="flex justify-between items-center border-b border-white/10 pb-2">
-              <h3 className="font-bold text-sm truncate" style={{ color: primaryColor }}>{selectedProduct.name}</h3>
-              <button onClick={() => setSelectedProduct(null)} className="opacity-60 font-bold text-xs">✕ Fechar</button>
+            <div className="flex justify-between items-start border-b border-white/10 pb-2 gap-2">
+              <h3 className="font-bold text-sm leading-snug flex-1" style={{ color: primaryColor }}>{selectedProduct.name}</h3>
+              <button onClick={() => setSelectedProduct(null)} className="opacity-60 hover:opacity-100 font-bold text-xs shrink-0 pt-0.5">✕ Fechar</button>
             </div>
 
             <img src={selectedProduct.image || 'https://images.unsplash.com/photo-1523275335684-37898b6baf30?w=300&auto=format&fit=crop&q=80'} alt={selectedProduct.name} className="w-full h-44 rounded-xl object-cover border border-white/10" />
