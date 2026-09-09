@@ -21,10 +21,23 @@ export default function AdminTenant() {
   const [reportFilter, setReportFilter] = useState('all');
 
   // FORMULÁRIOS E EDIÇÃO
-  const [newProd, setNewProd] = useState({ name: '', price: '', category_id: '', description: '', image: '' });
+  const [newProd, setNewProd] = useState({ 
+    name: '', 
+    price: '', 
+    category_id: '', 
+    description: '', 
+    image: '',
+    variations_json: []
+  });
   const [editingProduct, setEditingProduct] = useState(null);
   const [editingCategory, setEditingCategory] = useState(null);
   const [editingNeigh, setEditingNeigh] = useState(null);
+
+  // ESTADOS TEMPORÁRIOS PARA GERAR VARIAÇÕES (CADASTRO / EDIÇÃO)
+  const [tempVarName, setTempVarName] = useState('');
+  const [tempVarOptions, setTempVarOptions] = useState('');
+  const [tempEditVarName, setTempEditVarName] = useState('');
+  const [tempEditVarOptions, setTempEditVarOptions] = useState('');
 
   const [newCatName, setNewCatName] = useState('');
   const [newNeigh, setNewNeigh] = useState({ name: '', fee: '' });
@@ -88,7 +101,8 @@ export default function AdminTenant() {
       instagram_url: tenant.instagram_url || '',
       primary_color: tenant.primary_color || '#3B82F6',
       secondary_color: tenant.secondary_color || '#090D16',
-      admin_password: tenant.admin_password || ''
+      admin_password: tenant.admin_password || '',
+      niche: tenant.niche || 'general'
     };
 
     if ('pix_key' in tenant) updatePayload.pix_key = tenant.pix_key || '';
@@ -128,36 +142,84 @@ export default function AdminTenant() {
     }
   };
 
-  // MANIPULAÇÃO DE PEÇAS / PRODUTOS
+  // LÓGICA DE GERAR VARIAÇÕES (NOVO PRODUTO)
+  const handleAddVariationToNewProd = () => {
+    if (!tempVarName.trim() || !tempVarOptions.trim()) return alert("Preencha o nome do atributo e as opções!");
+    const optsArray = tempVarOptions.split(',').map(s => s.trim()).filter(Boolean);
+    const newVar = { attribute_name: tempVarName.trim(), options: optsArray };
+    setNewProd(prev => ({ ...prev, variations_json: [...(prev.variations_json || []), newVar] }));
+    setTempVarName('');
+    setTempVarOptions('');
+  };
+
+  const handleRemoveVariationFromNewProd = (index) => {
+    setNewProd(prev => ({
+      ...prev,
+      variations_json: (prev.variations_json || []).filter((_, i) => i !== index)
+    }));
+  };
+
+  // LÓGICA DE GERAR VARIAÇÕES (EDITAR PRODUTO)
+  const handleAddVariationToEditProd = () => {
+    if (!tempEditVarName.trim() || !tempEditVarOptions.trim()) return alert("Preencha o nome do atributo e as opções!");
+    const optsArray = tempEditVarOptions.split(',').map(s => s.trim()).filter(Boolean);
+    const newVar = { attribute_name: tempEditVarName.trim(), options: optsArray };
+    setEditingProduct(prev => ({ ...prev, variations_json: [...(prev.variations_json || []), newVar] }));
+    setTempEditVarName('');
+    setTempEditVarOptions('');
+  };
+
+  const handleRemoveVariationFromEditProd = (index) => {
+    setEditingProduct(prev => ({
+      ...prev,
+      variations_json: (prev.variations_json || []).filter((_, i) => i !== index)
+    }));
+  };
+
+  // MANIPULAÇÃO DE PRODUTOS
   const handleAddProduct = async (e) => {
     e.preventDefault();
     if (!newProd.name || !newProd.price) return alert("Preencha nome e preço!");
     const formattedPrice = parseFloat(String(newProd.price).replace(',', '.'));
-    await supabase.from('products').insert([{
+
+    const { error } = await supabase.from('products').insert([{
       tenant_id: tenant.id,
       category_id: parseInt(newProd.category_id || categories[0]?.id),
-      name: newProd.name,
+      name: newProd.name.trim(),
       description: newProd.description,
       price: formattedPrice,
       image: newProd.image || 'https://images.unsplash.com/photo-1521572267360-ee0c2909d518?w=300&auto=format&fit=crop&q=80',
+      variations_json: newProd.variations_json || [],
       active: true
     }]);
-    setNewProd({ name: '', price: '', category_id: categories[0]?.id || '', description: '', image: '' });
-    fetchData();
+
+    if (error) {
+      alert("Erro ao cadastrar produto: " + error.message);
+    } else {
+      setNewProd({ name: '', price: '', category_id: categories[0]?.id || '', description: '', image: '', variations_json: [] });
+      fetchData();
+    }
   };
 
   const handleUpdateProduct = async (e) => {
     e.preventDefault();
     const formattedPrice = parseFloat(String(editingProduct.price).replace(',', '.'));
-    await supabase.from('products').update({
-      name: editingProduct.name,
+    
+    const { error } = await supabase.from('products').update({
+      name: editingProduct.name.trim(),
       price: formattedPrice,
       description: editingProduct.description,
       category_id: parseInt(editingProduct.category_id),
-      image: editingProduct.image
+      image: editingProduct.image,
+      variations_json: editingProduct.variations_json || []
     }).eq('id', editingProduct.id);
-    setEditingProduct(null);
-    fetchData();
+
+    if (error) {
+      alert("Erro ao atualizar produto: " + error.message);
+    } else {
+      setEditingProduct(null);
+      fetchData();
+    }
   };
 
   // MANIPULAÇÃO DE CUPONS
@@ -216,13 +278,12 @@ export default function AdminTenant() {
     fetchData();
   };
 
-  // RELATÓRIOS (SÓ CONTABILIZA PEDIDOS COM STATUS 'PAGO')
+  // RELATÓRIOS
   const getFilteredOrders = () => {
     const now = new Date();
     return allOrders.filter(o => {
       if (o.status === 'cancelado') return false;
       
-      // FILTRO RIGOROSO: Exige que o status de pagamento seja 'PAGO'
       const isPaid = o.payment_method && o.payment_method.includes('PAGO');
       if (!isPaid) return false;
 
@@ -264,7 +325,7 @@ export default function AdminTenant() {
         <form onSubmit={handleLogin} className="bg-gray-900 p-6 rounded-2xl border border-gray-800 w-full max-w-sm space-y-4 shadow-2xl">
           <div className="text-center space-y-1">
             <h2 className="text-xl font-bold text-blue-500 mb-1">{tenant.name}</h2>
-            <p className="text-xs text-gray-400">Gestão do Catálogo & Vestuário</p>
+            <p className="text-xs text-gray-400">Gestão do Catálogo & E-commerce</p>
           </div>
           <input 
             type="password" 
@@ -287,7 +348,7 @@ export default function AdminTenant() {
       <header className="flex justify-between items-center py-4 border-b border-gray-800 mb-6">
         <div>
           <h1 className="font-bold text-lg text-blue-400 flex items-center space-x-2">
-            <span>👕 {tenant.name}</span>
+            <span>🛍️ {tenant.name}</span>
           </h1>
           <p className="text-xs text-gray-400">Painel de Gestão de Catálogo</p>
         </div>
@@ -302,14 +363,14 @@ export default function AdminTenant() {
           onClick={() => setActiveTab('products')} 
           style={activeTab === 'products' ? { backgroundColor: primaryColor, color: '#FFFFFF' } : {}}
           className={`flex-1 py-2.5 px-3 rounded-xl whitespace-nowrap transition ${activeTab === 'products' ? 'shadow-md' : 'text-gray-400 hover:text-white'}`}>
-          👕 Peças
+          📦 Produtos
         </button>
 
         <button 
           onClick={() => setActiveTab('categories')} 
           style={activeTab === 'categories' ? { backgroundColor: primaryColor, color: '#FFFFFF' } : {}}
           className={`flex-1 py-2.5 px-3 rounded-xl whitespace-nowrap transition ${activeTab === 'categories' ? 'shadow-md' : 'text-gray-400 hover:text-white'}`}>
-          🏷️ Coleções
+          🏷️ Categorias
         </button>
 
         <button 
@@ -323,7 +384,7 @@ export default function AdminTenant() {
           onClick={() => setActiveTab('neighborhoods')} 
           style={activeTab === 'neighborhoods' ? { backgroundColor: primaryColor, color: '#FFFFFF' } : {}}
           className={`flex-1 py-2.5 px-3 rounded-xl whitespace-nowrap transition ${activeTab === 'neighborhoods' ? 'shadow-md' : 'text-gray-400 hover:text-white'}`}>
-          📦 Fretes
+          🚚 Fretes
         </button>
 
         <button 
@@ -341,14 +402,14 @@ export default function AdminTenant() {
         </button>
       </div>
 
-      {/* PEÇAS / PRODUTOS */}
+      {/* PRODUTOS */}
       {activeTab === 'products' && (
         <div className="space-y-6">
           <section className="bg-gray-900 p-5 rounded-3xl border border-gray-800 space-y-4 shadow-xl">
-            <h3 className="font-bold text-sm text-blue-400">➕ Cadastrar Peça / Produto</h3>
+            <h3 className="font-bold text-sm text-blue-400">➕ Cadastrar Novo Produto</h3>
             <form onSubmit={handleAddProduct} className="space-y-3">
-              <input type="text" placeholder="Nome do Produto (Ex: Camisa Oversized Algodão)" value={newProd.name} className="w-full bg-gray-950 border border-gray-800 p-3 rounded-xl text-xs text-white focus:outline-none" onChange={(e) => setNewProd({ ...newProd, name: e.target.value })} />
-              <input type="text" placeholder="Descrição da peça" value={newProd.description} className="w-full bg-gray-950 border border-gray-800 p-3 rounded-xl text-xs text-white focus:outline-none" onChange={(e) => setNewProd({ ...newProd, description: e.target.value })} />
+              <input type="text" placeholder="Nome do Produto (Ex: Sérum Facial, Camisa Oversized, Vaso Decorativo)" value={newProd.name} className="w-full bg-gray-950 border border-gray-800 p-3 rounded-xl text-xs text-white focus:outline-none" onChange={(e) => setNewProd({ ...newProd, name: e.target.value })} />
+              <input type="text" placeholder="Descrição detalhada do produto" value={newProd.description} className="w-full bg-gray-950 border border-gray-800 p-3 rounded-xl text-xs text-white focus:outline-none" onChange={(e) => setNewProd({ ...newProd, description: e.target.value })} />
               
               <div className="flex space-x-2">
                 <input type="text" placeholder="Preço R$" value={newProd.price} className="w-1/2 bg-gray-950 border border-gray-800 p-3 rounded-xl text-xs text-white focus:outline-none" onChange={(e) => setNewProd({ ...newProd, price: e.target.value })} />
@@ -359,14 +420,55 @@ export default function AdminTenant() {
 
               <input type="text" placeholder="URL da Foto do Produto" value={newProd.image} className="w-full bg-gray-950 border border-gray-800 p-3 rounded-xl text-xs text-white focus:outline-none" onChange={(e) => setNewProd({ ...newProd, image: e.target.value })} />
 
+              {/* BLOCO DE VARIAÇÕES DINÂMICAS */}
+              <div className="bg-gray-950 p-3.5 rounded-2xl border border-gray-800 space-y-3">
+                <label className="text-xs font-bold text-blue-400 block">⚡ Variações / Opções do Produto (Opcional)</label>
+                <p className="text-[10px] text-gray-400">Ex: Atributo: <b>Voltagem</b> | Opções: <b>110V, 220V</b> ou Atributo: <b>Tamanho</b> | Opções: <b>P, M, G</b></p>
+                
+                <div className="flex space-x-2">
+                  <input 
+                    type="text" 
+                    placeholder="Atributo (ex: Tamanho, Voltagem, Volume)" 
+                    value={tempVarName} 
+                    onChange={(e) => setTempVarName(e.target.value)} 
+                    className="w-1/2 bg-gray-900 border border-gray-800 p-2.5 rounded-xl text-xs text-white focus:outline-none" 
+                  />
+                  <input 
+                    type="text" 
+                    placeholder="Opções separadas por vírgula (ex: P, M, G)" 
+                    value={tempVarOptions} 
+                    onChange={(e) => setTempVarOptions(e.target.value)} 
+                    className="w-1/2 bg-gray-900 border border-gray-800 p-2.5 rounded-xl text-xs text-white focus:outline-none" 
+                  />
+                </div>
+                <button 
+                  type="button" 
+                  onClick={handleAddVariationToNewProd} 
+                  className="w-full bg-gray-800 hover:bg-gray-700 text-blue-400 font-bold py-2 rounded-xl text-xs border border-gray-700 transition">
+                  + Adicionar Variação
+                </button>
+
+                {/* LISTA DE VARIAÇÕES ADICIONADAS */}
+                {newProd.variations_json && newProd.variations_json.length > 0 && (
+                  <div className="space-y-1.5 pt-2 border-t border-gray-800">
+                    {newProd.variations_json.map((v, idx) => (
+                      <div key={idx} className="flex justify-between items-center bg-gray-900 p-2 rounded-xl text-xs border border-gray-800">
+                        <span><b className="text-blue-400">{v.attribute_name}:</b> {v.options.join(', ')}</span>
+                        <button type="button" onClick={() => handleRemoveVariationFromNewProd(idx)} className="text-red-400 font-bold px-2">✕</button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
               <button type="submit" className="w-full bg-blue-600 hover:bg-blue-700 font-bold py-3 rounded-xl text-xs text-white transition shadow-lg">
-                Salvar Produto 👕
+                Salvar Produto 🚀
               </button>
             </form>
           </section>
 
           <section className="space-y-3">
-            <h3 className="font-bold text-sm text-gray-300">📋 Peças Cadastradas ({products.length})</h3>
+            <h3 className="font-bold text-sm text-gray-300">📋 Produtos Cadastrados ({products.length})</h3>
             {products.map((item) => (
               <div key={item.id} className="bg-gray-900 p-3.5 rounded-2xl border border-gray-800 flex justify-between items-center shadow-md">
                 <div className="flex items-center space-x-3">
@@ -378,9 +480,9 @@ export default function AdminTenant() {
                 </div>
 
                 <div className="flex items-center space-x-1.5">
-                  <button onClick={() => setEditingProduct(item)} className="text-xs bg-blue-600/20 text-blue-400 px-3 py-1.5 rounded-xl font-bold border border-blue-500/30">✏️ Editar</button>
+                  <button onClick={() => setEditingProduct({ ...item, variations_json: item.variations_json || [] })} className="text-xs bg-blue-600/20 text-blue-400 px-3 py-1.5 rounded-xl font-bold border border-blue-500/30">✏️ Editar</button>
                   <button onClick={async () => { await supabase.from('products').update({ active: !item.active }).eq('id', item.id); fetchData(); }} className={`text-[10px] font-bold px-2.5 py-1.5 rounded-xl ${item.active ? 'bg-green-500/20 text-green-400 border border-green-500/30' : 'bg-yellow-500/20 text-yellow-400 border border-yellow-500/30'}`}>{item.active ? 'Ativo' : 'Pausado'}</button>
-                  <button onClick={async () => { if (confirm("Deseja excluir esta peça?")) { await supabase.from('products').delete().eq('id', item.id); fetchData(); } }} className="text-xs bg-red-500/20 text-red-400 px-2.5 py-1.5 rounded-xl font-bold border border-red-500/30">🗑</button>
+                  <button onClick={async () => { if (confirm("Deseja excluir este produto?")) { await supabase.from('products').delete().eq('id', item.id); fetchData(); } }} className="text-xs bg-red-500/20 text-red-400 px-2.5 py-1.5 rounded-xl font-bold border border-red-500/30">🗑</button>
                 </div>
               </div>
             ))}
@@ -444,7 +546,7 @@ export default function AdminTenant() {
       {activeTab === 'neighborhoods' && (
         <div className="space-y-6">
           <section className="bg-gray-900 p-5 rounded-3xl border border-gray-800 space-y-4 shadow-xl">
-            <h3 className="font-bold text-sm text-blue-400">📦 Nova Opção de Frete / Envio</h3>
+            <h3 className="font-bold text-sm text-blue-400">🚚 Nova Opção de Frete / Envio</h3>
             <form onSubmit={handleAddNeighborhood} className="space-y-3">
               <input type="text" placeholder="Nome (Ex: SEDEX SP, PAC Brasil, Frete Fixo R$ 20)" value={newNeigh.name} className="w-full bg-gray-950 border border-gray-800 p-3 rounded-xl text-xs text-white focus:outline-none" onChange={(e) => setNewNeigh({ ...newNeigh, name: e.target.value })} />
               <input type="text" placeholder="Taxa de Envio R$ Ex: 20.00" value={newNeigh.fee} className="w-full bg-gray-950 border border-gray-800 p-3 rounded-xl text-xs text-white focus:outline-none" onChange={(e) => setNewNeigh({ ...newNeigh, fee: e.target.value })} />
@@ -469,13 +571,13 @@ export default function AdminTenant() {
         </div>
       )}
 
-      {/* COLEÇÕES */}
+      {/* CATEGORIAS / COLEÇÕES */}
       {activeTab === 'categories' && (
         <div className="space-y-6">
           <section className="bg-gray-900 p-5 rounded-3xl border border-gray-800 space-y-4 shadow-xl">
-            <h3 className="font-bold text-sm text-blue-400">🏷️ Nova Coleção / Categoria</h3>
+            <h3 className="font-bold text-sm text-blue-400">🏷️ Nova Categoria / Coleção</h3>
             <form onSubmit={handleAddCategory} className="flex space-x-2">
-              <input type="text" placeholder="Nome (Ex: Oversized, Polos, Bermudas)" value={newCatName} className="flex-1 bg-gray-950 border border-gray-800 p-3 rounded-xl text-xs text-white focus:outline-none" onChange={(e) => setNewCatName(e.target.value)} />
+              <input type="text" placeholder="Nome (Ex: Lançamentos, Skincare, Eletrônicos, Polos)" value={newCatName} className="flex-1 bg-gray-950 border border-gray-800 p-3 rounded-xl text-xs text-white focus:outline-none" onChange={(e) => setNewCatName(e.target.value)} />
               <button type="submit" className="bg-green-600 hover:bg-green-700 text-white font-bold px-5 py-3 rounded-xl text-xs transition">Adicionar</button>
             </form>
           </section>
@@ -486,7 +588,7 @@ export default function AdminTenant() {
                 <span className="font-bold text-white">{c.name}</span>
                 <div className="flex space-x-1.5">
                   <button onClick={() => setEditingCategory(c)} className="text-xs bg-blue-600/20 text-blue-400 px-3 py-1.5 rounded-xl font-bold border border-blue-500/30">✏️ Editar</button>
-                  <button onClick={async () => { if (confirm("Excluir coleção?")) { await supabase.from('categories').delete().eq('id', c.id); fetchData(); } }} className="text-red-400 font-bold p-1">🗑</button>
+                  <button onClick={async () => { if (confirm("Excluir categoria?")) { await supabase.from('categories').delete().eq('id', c.id); fetchData(); } }} className="text-red-400 font-bold p-1">🗑</button>
                 </div>
               </div>
             ))}
@@ -519,7 +621,7 @@ export default function AdminTenant() {
           </div>
 
           <section className="bg-gray-900 p-5 rounded-3xl border border-gray-800 space-y-3 shadow-xl">
-            <h3 className="font-bold text-xs text-blue-400 uppercase tracking-wider">🏆 PEÇAS MAIS VENDIDAS (CONFIRMADAS)</h3>
+            <h3 className="font-bold text-xs text-blue-400 uppercase tracking-wider">🏆 PRODUTOS MAIS VENDIDOS (CONFIRMADOS)</h3>
             <div className="space-y-2">
               {topProducts.length === 0 ? (
                 <p className="text-xs text-gray-400">Nenhum pedido pago no período selecionado.</p>
@@ -561,7 +663,22 @@ export default function AdminTenant() {
                 <input type="text" value={tenant.name || ''} className="w-full bg-gray-950 border border-gray-800 p-3 rounded-xl text-xs text-white focus:outline-none" onChange={(e) => setTenant({ ...tenant, name: e.target.value })} />
               </div>
 
-              {/* CAMPO DE LINK DO INSTAGRAM */}
+              {/* NICHO DA LOJA */}
+              <div>
+                <label className="text-[11px] text-blue-400 font-bold block mb-1">🎯 Segmento / Nicho do E-commerce:</label>
+                <select
+                  value={tenant.niche || 'fashion'}
+                  onChange={(e) => setTenant({ ...tenant, niche: e.target.value })}
+                  className="w-full bg-gray-950 border border-gray-800 p-3 rounded-xl text-xs text-white focus:outline-none">
+                  <option value="fashion">👕 Moda & Vestuário (Roupas, Calçados)</option>
+                  <option value="beauty">💄 Produtos de Beleza & Cosméticos</option>
+                  <option value="home">🏡 Casa, Decoração & Utilidades</option>
+                  <option value="electronics">🔌 Eletrônicos & Acessórios</option>
+                  <option value="general">📦 E-commerce Geral / Multi-produtos</option>
+                </select>
+              </div>
+
+              {/* LINK DO INSTAGRAM */}
               <div>
                 <label className="text-[11px] text-gray-400 block mb-1">Link do Instagram:</label>
                 <input 
@@ -695,7 +812,7 @@ export default function AdminTenant() {
       {editingCategory && (
         <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 p-4">
           <form onSubmit={handleUpdateCategory} className="bg-gray-900 w-full max-w-sm rounded-3xl p-5 border border-blue-500/40 space-y-3 shadow-2xl">
-            <h3 className="font-bold text-sm text-blue-400">✏️ Editar Coleção</h3>
+            <h3 className="font-bold text-sm text-blue-400">✏️ Editar Categoria</h3>
             <input type="text" value={editingCategory.name} onChange={(e) => setEditingCategory({ ...editingCategory, name: e.target.value })} className="w-full bg-gray-950 border border-gray-800 p-3 rounded-xl text-xs text-white focus:outline-none" />
             <div className="flex space-x-2 pt-2">
               <button type="button" onClick={() => setEditingCategory(null)} className="w-1/2 bg-gray-800 py-2.5 rounded-xl text-xs text-gray-300 font-bold">Cancelar</button>
@@ -705,6 +822,7 @@ export default function AdminTenant() {
         </div>
       )}
 
+      {/* MODAL EDITAR PRODUTO COM VARIAÇÕES */}
       {editingProduct && (
         <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 p-4">
           <form onSubmit={handleUpdateProduct} className="bg-gray-900 w-full max-w-sm rounded-3xl p-5 border border-blue-500/40 space-y-3 max-h-[90vh] overflow-y-auto shadow-2xl">
@@ -721,6 +839,45 @@ export default function AdminTenant() {
 
             <input type="text" value={editingProduct.image || ''} onChange={(e) => setEditingProduct({ ...editingProduct, image: e.target.value })} className="w-full bg-gray-950 border border-gray-800 p-3 rounded-xl text-xs text-white focus:outline-none" />
             
+            {/* EDIÇÃO DE VARIAÇÕES */}
+            <div className="bg-gray-950 p-3.5 rounded-2xl border border-gray-800 space-y-3">
+              <label className="text-xs font-bold text-blue-400 block">⚡ Variações / Opções do Produto</label>
+              
+              <div className="flex space-x-2">
+                <input 
+                  type="text" 
+                  placeholder="Atributo (ex: Voltagem, Tamanho)" 
+                  value={tempEditVarName} 
+                  onChange={(e) => setTempEditVarName(e.target.value)} 
+                  className="w-1/2 bg-gray-900 border border-gray-800 p-2.5 rounded-xl text-xs text-white focus:outline-none" 
+                />
+                <input 
+                  type="text" 
+                  placeholder="Opções (ex: 110V, 220V)" 
+                  value={tempEditVarOptions} 
+                  onChange={(e) => setTempEditVarOptions(e.target.value)} 
+                  className="w-1/2 bg-gray-900 border border-gray-800 p-2.5 rounded-xl text-xs text-white focus:outline-none" 
+                />
+              </div>
+              <button 
+                type="button" 
+                onClick={handleAddVariationToEditProd} 
+                className="w-full bg-gray-800 hover:bg-gray-700 text-blue-400 font-bold py-2 rounded-xl text-xs border border-gray-700 transition">
+                + Adicionar Variação
+              </button>
+
+              {editingProduct.variations_json && editingProduct.variations_json.length > 0 && (
+                <div className="space-y-1.5 pt-2 border-t border-gray-800">
+                  {editingProduct.variations_json.map((v, idx) => (
+                    <div key={idx} className="flex justify-between items-center bg-gray-900 p-2 rounded-xl text-xs border border-gray-800">
+                      <span><b className="text-blue-400">{v.attribute_name}:</b> {v.options.join(', ')}</span>
+                      <button type="button" onClick={() => handleRemoveVariationFromEditProd(idx)} className="text-red-400 font-bold px-2">✕</button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
             <div className="flex space-x-2 pt-2">
               <button type="button" onClick={() => setEditingProduct(null)} className="w-1/2 bg-gray-800 py-2.5 rounded-xl text-xs font-bold text-gray-300">Cancelar</button>
               <button type="submit" className="w-1/2 bg-blue-600 hover:bg-blue-700 py-2.5 rounded-xl text-xs font-bold text-white transition">Atualizar</button>
