@@ -79,9 +79,9 @@ export default function AdminTenant() {
     const { data: oData } = await supabase.from('orders').select('*').eq('tenant_id', tenantId).order('created_at', { ascending: false });
 
     if (tData) setTenant(tData);
-    if (cData) {
+    if (cData && cData.length > 0) {
       setCategories(cData);
-      if (cData.length > 0 && !newProd.category_id) setNewProd(prev => ({ ...prev, category_id: cData[0].id }));
+      setNewProd(prev => ({ ...prev, category_id: prev.category_id || cData[0].id }));
     }
     if (pData) setProducts(pData);
     if (nData) setNeighborhoods(nData);
@@ -180,11 +180,17 @@ export default function AdminTenant() {
   const handleAddProduct = async (e) => {
     e.preventDefault();
     if (!newProd.name || !newProd.price) return alert("Preencha nome e preço!");
+
+    const targetCategoryId = parseInt(newProd.category_id || categories[0]?.id);
+    if (!targetCategoryId || isNaN(targetCategoryId)) {
+      return alert("Selecione uma categoria válida antes de salvar!");
+    }
+
     const formattedPrice = parseFloat(String(newProd.price).replace(',', '.'));
 
     const { error } = await supabase.from('products').insert([{
       tenant_id: tenant.id,
-      category_id: parseInt(newProd.category_id || categories[0]?.id),
+      category_id: targetCategoryId,
       name: newProd.name.trim(),
       description: newProd.description,
       price: formattedPrice,
@@ -196,7 +202,15 @@ export default function AdminTenant() {
     if (error) {
       alert("Erro ao cadastrar produto: " + error.message);
     } else {
-      setNewProd({ name: '', price: '', category_id: categories[0]?.id || '', description: '', image: '', variations_json: [] });
+      alert("Produto cadastrado com sucesso!");
+      setNewProd({ 
+        name: '', 
+        price: '', 
+        category_id: categories[0]?.id || '', 
+        description: '', 
+        image: '', 
+        variations_json: [] 
+      });
       fetchData();
     }
   };
@@ -413,7 +427,10 @@ export default function AdminTenant() {
               
               <div className="flex space-x-2">
                 <input type="text" placeholder="Preço R$" value={newProd.price} className="w-1/2 bg-gray-950 border border-gray-800 p-3 rounded-xl text-xs text-white focus:outline-none" onChange={(e) => setNewProd({ ...newProd, price: e.target.value })} />
-                <select value={newProd.category_id} className="w-1/2 bg-gray-950 border border-gray-800 p-3 rounded-xl text-xs text-white focus:outline-none" onChange={(e) => setNewProd({ ...newProd, category_id: e.target.value })}>
+                <select 
+                  value={newProd.category_id || (categories[0]?.id || '')} 
+                  className="w-1/2 bg-gray-950 border border-gray-800 p-3 rounded-xl text-xs text-white focus:outline-none" 
+                  onChange={(e) => setNewProd({ ...newProd, category_id: e.target.value })}>
                   {categories.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
                 </select>
               </div>
