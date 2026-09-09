@@ -41,8 +41,18 @@ export default function EcommerceCliente() {
 
   const fetchTenantData = async () => {
     setLoading(true);
-    const cleanSlug = String(slug).toLowerCase().trim();
-    const { data: tData } = await supabase.from('tenants').select('*').eq('slug', cleanSlug).maybeSingle();
+    const cleanSlug = String(slug).trim();
+    
+    // Busca insensível a maiúsculas/minúsculas para evitar erro de slug
+    const { data: tData, error: tErr } = await supabase
+      .from('tenants')
+      .select('*')
+      .ilike('slug', cleanSlug)
+      .maybeSingle();
+
+    if (tErr) {
+      console.error("Erro ao buscar dados do tenant:", tErr.message);
+    }
 
     if (tData) {
       setTenant(tData);
@@ -89,7 +99,6 @@ export default function EcommerceCliente() {
         }
       });
     } else if (tenant?.niche === 'fashion' || !tenant?.niche) {
-      // Caso seja loja de roupas ou padrão, usa tamanho Padrão
       initialVars['Tamanho'] = 'M';
     }
 
@@ -106,7 +115,6 @@ export default function EcommerceCliente() {
   const handleAddProductToCart = () => {
     if (!selectedProduct) return;
 
-    // Converte variações em texto legível
     const variationEntries = Object.entries(selectedVariations);
     const variationsText = variationEntries.map(([key, val]) => `${key}: ${val}`).join(' | ');
 
@@ -141,7 +149,6 @@ export default function EcommerceCliente() {
   if (loading) return <div className="min-h-screen bg-gray-950 text-white flex items-center justify-center font-sans"><p className="text-xs text-gray-400">Carregando loja...</p></div>;
   if (!tenant) return <div className="min-h-screen bg-gray-950 text-white flex items-center justify-center font-sans"><h1 className="text-xl font-bold text-orange-500">Loja não encontrada</h1></div>;
 
-  // VARIÁVEIS DE CORES DINÂMICAS
   const primaryColor = tenant.primary_color || '#FF8C00';
   const btnTextColor = tenant.button_text_color || '#FFFFFF';
   const bgColor = tenant.background_color || tenant.secondary_color || '#090D16';
@@ -161,13 +168,51 @@ export default function EcommerceCliente() {
     if (cart.length === 0) return alert("Seu carrinho está vazio!");
     if (!customerName || !customerPhone) return alert("Preencha seu Nome e WhatsApp!");
     if (deliveryType === 'ENTREGA' && !customerAddress) return alert("Preencha seu Endereço para entrega!");
+    if (!tenant || !tenant.id) return alert("Erro: Dados da loja não carregados corretamente.");
 
     setIsSubmitting(true);
+
+    // 1. MONTA O PAYLOAD DO PEDIDO E SALVA NO SUPABASE
+    const orderPayload = {
+      tenant_id: tenant.id,
+      customer_name: customerName,
+      customer_phone: customerPhone,
+      address: deliveryType === 'ENTREGA' ? customerAddress : 'Retirada na Loja',
+      neighborhood: deliveryType === 'ENTREGA' ? 'Entrega em Casa' : 'Retirar na Loja',
+      items: cart.map(i => ({
+        id: i.id,
+        name: i.name,
+        quantity: i.quantity,
+        price: Number(i.price),
+        size: i.variations?.Tamanho || i.variationsText || 'Padrão',
+        variationsText: i.variationsText || '',
+        note: i.note || ''
+      })),
+      subtotal: Number(subtotal.toFixed(2)),
+      delivery_fee: Number(currentFee.toFixed(2)),
+      total: Number(total.toFixed(2)),
+      payment_method: paymentMethod,
+      status: 'recebido'
+    };
+
+    const { data: insertedOrder, error: insertErr } = await supabase
+      .from('orders')
+      .insert([orderPayload])
+      .select()
+      .maybeSingle();
+
+    if (insertErr) {
+      alert("⚠️ Erro ao salvar pedido no banco de dados:\n" + insertErr.message);
+      setIsSubmitting(false);
+      return;
+    }
 
     if (window.fbq) {
       window.fbq('track', 'Purchase', { value: total, currency: 'BRL' });
     }
 
+    // 2. ENVIA A NOTIFICAÇÃO VIA WHATSAPP
+    let orderTag = insertedOrder?.id ? ` #${insertedOrder.id}` : '';
     let itemsText = cart.map(i => {
       let varStr = i.variationsText ? ` [${i.variationsText}]` : '';
       let txt = `• ${i.quantity}x ${i.name}${varStr} (R$ ${(Number(i.price) * i.quantity).toFixed(2)})`;
@@ -175,7 +220,7 @@ export default function EcommerceCliente() {
       return txt;
     }).join('\n\n');
 
-    let msg = `*NOVA COMPRA NA LOJA - ${tenant.name.toUpperCase()}*\n\n`;
+    let msg = `*NOVA COMPRA NA LOJA${orderTag} - ${tenant.name.toUpperCase()}*\n\n`;
     msg += `*Cliente:* ${customerName}\n*Telefone:* ${customerPhone}\n`;
     msg += `*Tipo:* ${deliveryType === 'ENTREGA' ? `Entrega em: ${customerAddress}` : 'Retirar na Loja'}\n\n`;
     msg += `*ITENS COMPRADOS:*\n${itemsText}\n\n`;
@@ -196,14 +241,12 @@ export default function EcommerceCliente() {
     setIsSubmitting(false);
     setCart([]);
     setShowCartModal(false);
-    alert("Pedido de compra enviado para o WhatsApp!");
+    alert("Pedido registrado e enviado para o WhatsApp com sucesso!");
   };
 
-  // VERIFICA SE O PRODUTO SELECIONADO TEM VARIAÇÕES
   const hasCustomVariations = selectedProduct?.variations_json && Array.isArray(selectedProduct.variations_json) && selectedProduct.variations_json.length > 0;
   const isFashionFallback = !hasCustomVariations && (tenant?.niche === 'fashion' || !tenant?.niche);
 
-  // EXTRAI GALERIA DE FOTOS PARA O MODAL
   const productGallery = selectedProduct?.images_json && Array.isArray(selectedProduct.images_json) && selectedProduct.images_json.length > 0
     ? selectedProduct.images_json
     : (selectedProduct?.image ? [selectedProduct.image] : []);
@@ -214,7 +257,6 @@ export default function EcommerceCliente() {
       <div className="relative h-36 bg-gray-900 border-b border-white/10">
         <img src={tenant.banner_url || 'https://images.unsplash.com/photo-1441986300917-64674bd600d8?w=800&auto=format&fit=crop&q=80'} alt="Capa da Loja" className="w-full h-full object-cover opacity-50" />
         
-        {/* BOTÃO DO INSTAGRAM */}
         {tenant.instagram_url && (
           <a
             href={tenant.instagram_url.startsWith('http') ? tenant.instagram_url : `https://${tenant.instagram_url}`}
@@ -322,10 +364,8 @@ export default function EcommerceCliente() {
               <button onClick={() => setSelectedProduct(null)} className="opacity-60 hover:opacity-100 font-bold text-xs shrink-0 pt-0.5">✕ Fechar</button>
             </div>
 
-            {/* FOTO PRINCIPAL / DESTACADA */}
             <img src={activeImage} alt={selectedProduct.name} className="w-full h-44 rounded-xl object-cover border border-white/10 bg-gray-900" />
             
-            {/* GALERIA DE MINIATURAS (SE HOUVER MAIS DE 1 FOTO) */}
             {productGallery.length > 1 && (
               <div className="flex space-x-2 overflow-x-auto pb-1 scrollbar-none">
                 {productGallery.map((imgUrl, idx) => (
@@ -346,7 +386,6 @@ export default function EcommerceCliente() {
               <p className="text-xs opacity-70">{selectedProduct.description}</p>
             </div>
 
-            {/* SELETOR DE VARIAÇÕES DINÂMICAS (JSON) */}
             {hasCustomVariations && selectedProduct.variations_json.map((v, idx) => (
               <div key={idx} className="space-y-2 pt-2 border-t border-white/10">
                 <label className="text-xs font-bold block opacity-80">🏷️ Selecione: {v.attribute_name}</label>
@@ -372,7 +411,6 @@ export default function EcommerceCliente() {
               </div>
             ))}
 
-            {/* SELETOR PADRÃO DE TAMANHOS (FALLBACK ROUPAS) */}
             {isFashionFallback && (
               <div className="space-y-2 pt-2 border-t border-white/10">
                 <label className="text-xs font-bold block opacity-80">🏷️ Selecione o Tamanho da Peça:</label>
@@ -398,7 +436,6 @@ export default function EcommerceCliente() {
               </div>
             )}
 
-            {/* CAMPO DE OBSERVAÇÕES */}
             <div className="space-y-1 pt-1">
               <label className="text-xs font-bold block opacity-80">📝 Observação (Opcional):</label>
               <input
@@ -411,7 +448,6 @@ export default function EcommerceCliente() {
               />
             </div>
 
-            {/* CONTADOR DE QUANTIDADE E BOTÃO */}
             <div className="flex items-center space-x-3 pt-2">
               <div className="flex items-center space-x-2 bg-black/30 p-1 rounded-xl border border-white/10">
                 <button onClick={() => setProductQuantity(Math.max(1, productQuantity - 1))} className="w-8 h-8 rounded-lg bg-gray-800 text-white font-bold text-sm">-</button>
