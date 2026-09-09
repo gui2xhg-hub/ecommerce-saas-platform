@@ -20,7 +20,8 @@ export default function AdminTenant() {
   const [allOrders, setAllOrders] = useState([]);
   const [reportFilter, setReportFilter] = useState('all');
 
-  // CONFIGURAÇÕES AUTOMÁTICAS DE FRETE
+  // CONFIGURAÇÕES AUTOMÁTICAS DE FRETE E CEP DE ORIGEM
+  const [originCep, setOriginCep] = useState('');
   const [defaultShippingFee, setDefaultShippingFee] = useState(10.00);
   const [freeShippingThreshold, setFreeShippingThreshold] = useState(0.00);
   const [enablePickup, setEnablePickup] = useState(true);
@@ -62,6 +63,7 @@ export default function AdminTenant() {
     const { data: tData } = await supabase.from('tenants').select('*').eq('slug', slug).single();
     if (tData) {
       setTenant(tData);
+      setOriginCep(tData.origin_cep || '');
       setDefaultShippingFee(tData.default_shipping_fee ?? 10.00);
       setFreeShippingThreshold(tData.free_shipping_threshold ?? 0.00);
       setEnablePickup(tData.enable_pickup ?? true);
@@ -96,6 +98,7 @@ export default function AdminTenant() {
 
     if (tData) {
       setTenant(tData);
+      setOriginCep(tData.origin_cep || '');
       setDefaultShippingFee(tData.default_shipping_fee ?? 10.00);
       setFreeShippingThreshold(tData.free_shipping_threshold ?? 0.00);
       setEnablePickup(tData.enable_pickup ?? true);
@@ -111,7 +114,7 @@ export default function AdminTenant() {
   };
 
   const handleSaveTenantSettings = async (e) => {
-    e.preventDefault();
+    if (e) e.preventDefault();
     const cleanWhatsapp = tenant.whatsapp ? String(tenant.whatsapp).replace(/\D/g, '') : '';
 
     const updatePayload = {
@@ -124,6 +127,7 @@ export default function AdminTenant() {
       secondary_color: tenant.secondary_color || '#090D16',
       admin_password: tenant.admin_password || '',
       niche: tenant.niche || 'general',
+      origin_cep: originCep,
       default_shipping_fee: Number(defaultShippingFee),
       free_shipping_threshold: Number(freeShippingThreshold),
       enable_pickup: enablePickup
@@ -468,7 +472,7 @@ export default function AdminTenant() {
           onClick={() => setActiveTab('neighborhoods')} 
           style={activeTab === 'neighborhoods' ? { backgroundColor: primaryColor, color: '#FFFFFF' } : {}}
           className={`flex-1 py-2.5 px-3 rounded-xl whitespace-nowrap transition ${activeTab === 'neighborhoods' ? 'shadow-md' : 'text-gray-400 hover:text-white'}`}>
-          🚚 Fretes
+          🚚 Fretes & CEP
         </button>
 
         <button 
@@ -684,15 +688,80 @@ export default function AdminTenant() {
         </div>
       )}
 
-      {/* FRETE */}
+      {/* FRETE & CEP DE ORIGEM (SESSÃO ÚNICA DE FRETE) */}
       {activeTab === 'neighborhoods' && (
         <div className="space-y-6">
+          <section className="bg-gray-900 p-5 rounded-3xl border border-orange-500/30 space-y-4 shadow-xl">
+            <h3 className="font-bold text-sm text-orange-400 flex items-center space-x-2">
+              <span>🛵 Configurações Gerais de Frete & Cálculo por CEP</span>
+            </h3>
+
+            <div className="space-y-3">
+              <div>
+                <label className="text-xs text-gray-400 block mb-1">CEP de Origem da Loja (Para cálculo Correios / PAC / SEDEX):</label>
+                <input
+                  type="text"
+                  placeholder="Ex: 88301-000"
+                  value={originCep}
+                  onChange={(e) => setOriginCep(e.target.value)}
+                  className="w-full bg-gray-950 border border-gray-800 p-3 rounded-xl text-xs text-white focus:outline-none font-mono"
+                />
+                <span className="text-[10px] text-gray-500 block mt-1">CEP do local de onde os produtos serão despachados.</span>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                <div>
+                  <label className="text-xs text-gray-400 block mb-1">Taxa Padrão / Fixa de Entrega (R$):</label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    value={defaultShippingFee}
+                    onChange={(e) => setDefaultShippingFee(e.target.value)}
+                    className="w-full bg-gray-950 border border-gray-800 p-2.5 rounded-xl text-xs text-white focus:outline-none"
+                    placeholder="10.00"
+                  />
+                </div>
+
+                <div>
+                  <label className="text-xs text-gray-400 block mb-1">Valor p/ Frete Grátis (R$):</label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    value={freeShippingThreshold}
+                    onChange={(e) => setFreeShippingThreshold(e.target.value)}
+                    className="w-full bg-gray-950 border border-gray-800 p-2.5 rounded-xl text-xs text-white focus:outline-none"
+                    placeholder="0.00"
+                  />
+                  <span className="text-[9px] text-gray-500 block mt-0.5">(0 = sem regra de frete grátis)</span>
+                </div>
+
+                <div>
+                  <label className="text-xs text-gray-400 block mb-1">Permitir Retirada?</label>
+                  <select
+                    value={enablePickup ? 'SIM' : 'NAO'}
+                    onChange={(e) => setEnablePickup(e.target.value === 'SIM')}
+                    className="w-full bg-gray-950 border border-gray-800 p-2.5 rounded-xl text-xs text-white focus:outline-none">
+                    <option value="SIM">Sim (Cliente pode retirar)</option>
+                    <option value="NAO">Não (Apenas Entrega)</option>
+                  </select>
+                </div>
+              </div>
+
+              <button
+                type="button"
+                onClick={handleSaveTenantSettings}
+                className="w-full bg-orange-600 hover:bg-orange-700 text-white font-bold py-3 rounded-xl text-xs transition shadow-md mt-2">
+                💾 Salvar Configurações de Frete
+              </button>
+            </div>
+          </section>
+
           <section className="bg-gray-900 p-5 rounded-3xl border border-gray-800 space-y-4 shadow-xl">
-            <h3 className="font-bold text-sm text-blue-400">🚚 Nova Opção de Frete / Envio por Bairro</h3>
+            <h3 className="font-bold text-sm text-blue-400">🚚 Opções Complementares de Frete / Envio por Bairro ou Região (Manual)</h3>
             <form onSubmit={handleAddNeighborhood} className="space-y-3">
-              <input type="text" placeholder="Nome (Ex: SEDEX SP, PAC Brasil, Frete Fixo R$ 20)" value={newNeigh.name} className="w-full bg-gray-950 border border-gray-800 p-3 rounded-xl text-xs text-white focus:outline-none" onChange={(e) => setNewNeigh({ ...newNeigh, name: e.target.value })} />
+              <input type="text" placeholder="Nome (Ex: Motoboy Centro, SEDEX SP, PAC Brasil)" value={newNeigh.name} className="w-full bg-gray-950 border border-gray-800 p-3 rounded-xl text-xs text-white focus:outline-none" onChange={(e) => setNewNeigh({ ...newNeigh, name: e.target.value })} />
               <input type="text" placeholder="Taxa de Envio R$ Ex: 20.00" value={newNeigh.fee} className="w-full bg-gray-950 border border-gray-800 p-3 rounded-xl text-xs text-white focus:outline-none" onChange={(e) => setNewNeigh({ ...newNeigh, fee: e.target.value })} />
-              <button type="submit" className="w-full bg-green-600 hover:bg-green-700 font-bold py-3 rounded-xl text-xs text-white transition">Cadastrar Opção de Frete</button>
+              <button type="submit" className="w-full bg-green-600 hover:bg-green-700 font-bold py-3 rounded-xl text-xs text-white transition">Cadastrar Opção Manual de Frete</button>
             </form>
           </section>
 
@@ -793,7 +862,7 @@ export default function AdminTenant() {
         </div>
       )}
 
-      {/* CONFIGURAÇÕES */}
+      {/* CONFIGURAÇÕES GERAIS */}
       {activeTab === 'settings' && (
         <div className="space-y-6">
           <section className="bg-gray-900 p-5 rounded-3xl border border-gray-800 space-y-4 shadow-xl">
@@ -802,51 +871,6 @@ export default function AdminTenant() {
               <div>
                 <label className="text-[11px] text-gray-400 block mb-1">Nome da Loja:</label>
                 <input type="text" value={tenant.name || ''} className="w-full bg-gray-950 border border-gray-800 p-3 rounded-xl text-xs text-white focus:outline-none" onChange={(e) => setTenant({ ...tenant, name: e.target.value })} />
-              </div>
-
-              {/* REGRAS AUTOMÁTICAS DE FRETE E ENVIO */}
-              <div className="bg-gray-950 p-4 rounded-2xl border border-orange-500/30 space-y-3">
-                <h4 className="font-bold text-xs text-orange-400 flex items-center space-x-1">
-                  <span>🛵 Configurações Automáticas de Frete & Envio</span>
-                </h4>
-
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-                  <div>
-                    <label className="text-[11px] text-gray-400 block mb-1">Taxa Padrão de Entrega (R$):</label>
-                    <input
-                      type="number"
-                      step="0.01"
-                      value={defaultShippingFee}
-                      onChange={(e) => setDefaultShippingFee(e.target.value)}
-                      className="w-full bg-gray-900 border border-gray-800 p-2.5 rounded-xl text-xs text-white focus:outline-none"
-                      placeholder="10.00"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="text-[11px] text-gray-400 block mb-1">Valor p/ Frete Grátis (R$):</label>
-                    <input
-                      type="number"
-                      step="0.01"
-                      value={freeShippingThreshold}
-                      onChange={(e) => setFreeShippingThreshold(e.target.value)}
-                      className="w-full bg-gray-900 border border-gray-800 p-2.5 rounded-xl text-xs text-white focus:outline-none"
-                      placeholder="0.00"
-                    />
-                    <span className="text-[9px] text-gray-500 block mt-0.5">(0 = sem regra de frete grátis)</span>
-                  </div>
-
-                  <div>
-                    <label className="text-[11px] text-gray-400 block mb-1">Permitir Retirada?</label>
-                    <select
-                      value={enablePickup ? 'SIM' : 'NAO'}
-                      onChange={(e) => setEnablePickup(e.target.value === 'SIM')}
-                      className="w-full bg-gray-900 border border-gray-800 p-2.5 rounded-xl text-xs text-white focus:outline-none">
-                      <option value="SIM">Sim (Cliente pode retirar)</option>
-                      <option value="NAO">Não (Apenas Entrega)</option>
-                    </select>
-                  </div>
-                </div>
               </div>
 
               {/* NICHO DA LOJA */}
