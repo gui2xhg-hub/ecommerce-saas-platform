@@ -27,17 +27,22 @@ export default function AdminTenant() {
     category_id: '', 
     description: '', 
     image: '',
+    images_json: [],
     variations_json: []
   });
   const [editingProduct, setEditingProduct] = useState(null);
   const [editingCategory, setEditingCategory] = useState(null);
   const [editingNeigh, setEditingNeigh] = useState(null);
 
-  // ESTADOS TEMPORÁRIOS PARA GERAR VARIAÇÕES (CADASTRO / EDIÇÃO)
+  // ESTADOS TEMPORÁRIOS PARA VARIAÇÕES
   const [tempVarName, setTempVarName] = useState('');
   const [tempVarOptions, setTempVarOptions] = useState('');
   const [tempEditVarName, setTempEditVarName] = useState('');
   const [tempEditVarOptions, setTempEditVarOptions] = useState('');
+
+  // ESTADOS TEMPORÁRIOS PARA IMAGENS / GALERIA
+  const [tempImageUrl, setTempImageUrl] = useState('');
+  const [tempEditImageUrl, setTempEditImageUrl] = useState('');
 
   const [newCatName, setNewCatName] = useState('');
   const [newNeigh, setNewNeigh] = useState({ name: '', fee: '' });
@@ -142,6 +147,52 @@ export default function AdminTenant() {
     }
   };
 
+  // GERENCIAMENTO DE IMAGENS (NOVO PRODUTO)
+  const handleAddImageToNewProd = () => {
+    if (!tempImageUrl.trim()) return alert("Insira a URL da imagem!");
+    const url = tempImageUrl.trim();
+    setNewProd(prev => ({
+      ...prev,
+      image: prev.image || url,
+      images_json: [...(prev.images_json || []), url]
+    }));
+    setTempImageUrl('');
+  };
+
+  const handleRemoveImageFromNewProd = (index) => {
+    setNewProd(prev => {
+      const updated = (prev.images_json || []).filter((_, i) => i !== index);
+      return {
+        ...prev,
+        image: updated.length > 0 ? updated[0] : '',
+        images_json: updated
+      };
+    });
+  };
+
+  // GERENCIAMENTO DE IMAGENS (EDITAR PRODUTO)
+  const handleAddImageToEditProd = () => {
+    if (!tempEditImageUrl.trim()) return alert("Insira a URL da imagem!");
+    const url = tempEditImageUrl.trim();
+    setEditingProduct(prev => ({
+      ...prev,
+      image: prev.image || url,
+      images_json: [...(prev.images_json || []), url]
+    }));
+    setTempEditImageUrl('');
+  };
+
+  const handleRemoveImageFromEditProd = (index) => {
+    setEditingProduct(prev => {
+      const updated = (prev.images_json || []).filter((_, i) => i !== index);
+      return {
+        ...prev,
+        image: updated.length > 0 ? updated[0] : '',
+        images_json: updated
+      };
+    });
+  };
+
   // LÓGICA DE GERAR VARIAÇÕES (NOVO PRODUTO)
   const handleAddVariationToNewProd = () => {
     if (!tempVarName.trim() || !tempVarOptions.trim()) return alert("Preencha o nome do atributo e as opções!");
@@ -187,6 +238,7 @@ export default function AdminTenant() {
     }
 
     const formattedPrice = parseFloat(String(newProd.price).replace(',', '.'));
+    const mainImage = newProd.image || (newProd.images_json && newProd.images_json[0]) || 'https://images.unsplash.com/photo-1521572267360-ee0c2909d518?w=300&auto=format&fit=crop&q=80';
 
     const { error } = await supabase.from('products').insert([{
       tenant_id: tenant.id,
@@ -194,7 +246,8 @@ export default function AdminTenant() {
       name: newProd.name.trim(),
       description: newProd.description,
       price: formattedPrice,
-      image: newProd.image || 'https://images.unsplash.com/photo-1521572267360-ee0c2909d518?w=300&auto=format&fit=crop&q=80',
+      image: mainImage,
+      images_json: newProd.images_json || [mainImage],
       variations_json: newProd.variations_json || [],
       active: true
     }]);
@@ -209,6 +262,7 @@ export default function AdminTenant() {
         category_id: categories[0]?.id || '', 
         description: '', 
         image: '', 
+        images_json: [],
         variations_json: [] 
       });
       fetchData();
@@ -218,13 +272,15 @@ export default function AdminTenant() {
   const handleUpdateProduct = async (e) => {
     e.preventDefault();
     const formattedPrice = parseFloat(String(editingProduct.price).replace(',', '.'));
-    
+    const mainImage = editingProduct.image || (editingProduct.images_json && editingProduct.images_json[0]) || '';
+
     const { error } = await supabase.from('products').update({
       name: editingProduct.name.trim(),
       price: formattedPrice,
       description: editingProduct.description,
       category_id: parseInt(editingProduct.category_id),
-      image: editingProduct.image,
+      image: mainImage,
+      images_json: editingProduct.images_json || [mainImage],
       variations_json: editingProduct.variations_json || []
     }).eq('id', editingProduct.id);
 
@@ -435,7 +491,43 @@ export default function AdminTenant() {
                 </select>
               </div>
 
-              <input type="text" placeholder="URL da Foto do Produto" value={newProd.image} className="w-full bg-gray-950 border border-gray-800 p-3 rounded-xl text-xs text-white focus:outline-none" onChange={(e) => setNewProd({ ...newProd, image: e.target.value })} />
+              {/* BLOCO DE MULTÍPLAS FOTOS / GALERIA */}
+              <div className="bg-gray-950 p-3.5 rounded-2xl border border-gray-800 space-y-3">
+                <label className="text-xs font-bold text-blue-400 block">🖼️ Galeria de Fotos do Produto</label>
+                <div className="flex space-x-2">
+                  <input 
+                    type="text" 
+                    placeholder="URL da Foto do Produto" 
+                    value={tempImageUrl} 
+                    onChange={(e) => setTempImageUrl(e.target.value)} 
+                    className="flex-1 bg-gray-900 border border-gray-800 p-2.5 rounded-xl text-xs text-white focus:outline-none" 
+                  />
+                  <button 
+                    type="button" 
+                    onClick={handleAddImageToNewProd} 
+                    className="bg-blue-600 hover:bg-blue-700 text-white font-bold px-3 py-2 rounded-xl text-xs transition">
+                    + Foto
+                  </button>
+                </div>
+
+                {/* MINIATURAS DAS IMAGENS ADICIONADAS */}
+                {newProd.images_json && newProd.images_json.length > 0 && (
+                  <div className="flex flex-wrap gap-2 pt-2 border-t border-gray-800">
+                    {newProd.images_json.map((imgUrl, idx) => (
+                      <div key={idx} className="relative group w-16 h-16 rounded-xl border border-gray-800 overflow-hidden bg-gray-900">
+                        <img src={imgUrl} alt={`Foto ${idx + 1}`} className="w-full h-full object-cover" />
+                        <button 
+                          type="button" 
+                          onClick={() => handleRemoveImageFromNewProd(idx)} 
+                          className="absolute top-0.5 right-0.5 bg-red-600 text-white rounded-full w-4 h-4 text-[10px] flex items-center justify-center font-bold shadow">
+                          ✕
+                        </button>
+                        {idx === 0 && <span className="absolute bottom-0 inset-x-0 bg-blue-600 text-[8px] text-center font-bold py-0.5">Capa</span>}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
 
               {/* BLOCO DE VARIAÇÕES DINÂMICAS */}
               <div className="bg-gray-950 p-3.5 rounded-2xl border border-gray-800 space-y-3">
@@ -497,7 +589,7 @@ export default function AdminTenant() {
                 </div>
 
                 <div className="flex items-center space-x-1.5">
-                  <button onClick={() => setEditingProduct({ ...item, variations_json: item.variations_json || [] })} className="text-xs bg-blue-600/20 text-blue-400 px-3 py-1.5 rounded-xl font-bold border border-blue-500/30">✏️ Editar</button>
+                  <button onClick={() => setEditingProduct({ ...item, images_json: item.images_json || (item.image ? [item.image] : []), variations_json: item.variations_json || [] })} className="text-xs bg-blue-600/20 text-blue-400 px-3 py-1.5 rounded-xl font-bold border border-blue-500/30">✏️ Editar</button>
                   <button onClick={async () => { await supabase.from('products').update({ active: !item.active }).eq('id', item.id); fetchData(); }} className={`text-[10px] font-bold px-2.5 py-1.5 rounded-xl ${item.active ? 'bg-green-500/20 text-green-400 border border-green-500/30' : 'bg-yellow-500/20 text-yellow-400 border border-yellow-500/30'}`}>{item.active ? 'Ativo' : 'Pausado'}</button>
                   <button onClick={async () => { if (confirm("Deseja excluir este produto?")) { await supabase.from('products').delete().eq('id', item.id); fetchData(); } }} className="text-xs bg-red-500/20 text-red-400 px-2.5 py-1.5 rounded-xl font-bold border border-red-500/30">🗑</button>
                 </div>
@@ -839,7 +931,7 @@ export default function AdminTenant() {
         </div>
       )}
 
-      {/* MODAL EDITAR PRODUTO COM VARIAÇÕES */}
+      {/* MODAL EDITAR PRODUTO COM VARIAÇÕES E FOTOS */}
       {editingProduct && (
         <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 p-4">
           <form onSubmit={handleUpdateProduct} className="bg-gray-900 w-full max-w-sm rounded-3xl p-5 border border-blue-500/40 space-y-3 max-h-[90vh] overflow-y-auto shadow-2xl">
@@ -854,8 +946,43 @@ export default function AdminTenant() {
               </select>
             </div>
 
-            <input type="text" value={editingProduct.image || ''} onChange={(e) => setEditingProduct({ ...editingProduct, image: e.target.value })} className="w-full bg-gray-950 border border-gray-800 p-3 rounded-xl text-xs text-white focus:outline-none" />
-            
+            {/* FOTOS NO MODAL DE EDIÇÃO */}
+            <div className="bg-gray-950 p-3.5 rounded-2xl border border-gray-800 space-y-3">
+              <label className="text-xs font-bold text-blue-400 block">🖼️ Galeria de Fotos do Produto</label>
+              <div className="flex space-x-2">
+                <input 
+                  type="text" 
+                  placeholder="URL da Foto do Produto" 
+                  value={tempEditImageUrl} 
+                  onChange={(e) => setTempEditImageUrl(e.target.value)} 
+                  className="flex-1 bg-gray-900 border border-gray-800 p-2.5 rounded-xl text-xs text-white focus:outline-none" 
+                />
+                <button 
+                  type="button" 
+                  onClick={handleAddImageToEditProd} 
+                  className="bg-blue-600 hover:bg-blue-700 text-white font-bold px-3 py-2 rounded-xl text-xs transition">
+                  + Foto
+                </button>
+              </div>
+
+              {editingProduct.images_json && editingProduct.images_json.length > 0 && (
+                <div className="flex flex-wrap gap-2 pt-2 border-t border-gray-800">
+                  {editingProduct.images_json.map((imgUrl, idx) => (
+                    <div key={idx} className="relative group w-16 h-16 rounded-xl border border-gray-800 overflow-hidden bg-gray-900">
+                      <img src={imgUrl} alt={`Foto ${idx + 1}`} className="w-full h-full object-cover" />
+                      <button 
+                        type="button" 
+                        onClick={() => handleRemoveImageFromEditProd(idx)} 
+                        className="absolute top-0.5 right-0.5 bg-red-600 text-white rounded-full w-4 h-4 text-[10px] flex items-center justify-center font-bold shadow">
+                        ✕
+                      </button>
+                      {idx === 0 && <span className="absolute bottom-0 inset-x-0 bg-blue-600 text-[8px] text-center font-bold py-0.5">Capa</span>}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
             {/* EDIÇÃO DE VARIAÇÕES */}
             <div className="bg-gray-950 p-3.5 rounded-2xl border border-gray-800 space-y-3">
               <label className="text-xs font-bold text-blue-400 block">⚡ Variações / Opções do Produto</label>
