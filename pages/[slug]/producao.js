@@ -13,7 +13,7 @@ export default function FilaProducao() {
   useEffect(() => {
     if (router.isReady && slug) {
       fetchData();
-      const interval = setInterval(fetchData, 15000);
+      const interval = setInterval(fetchData, 10000); // Atualiza a cada 10s
       return () => clearInterval(interval);
     }
   }, [router.isReady, slug]);
@@ -63,14 +63,14 @@ export default function FilaProducao() {
           .title { font-size: 16px; font-weight: bold; }
           .subtitle { font-size: 12px; }
           .section { border-bottom: 1px dashed #000; padding: 8px 0; font-size: 12px; }
-          .item { margin-bottom: 5px; }
+          .item { margin-bottom: 8px; }
           .total { font-size: 14px; font-weight: bold; text-align: right; margin-top: 10px; }
           .footer { text-align: center; margin-top: 20px; font-size: 10px; }
         </style>
       </head>
       <body>
         <div class="header">
-          <div class="title">${tenant?.name || 'LOJA DE ROUPAS'}</div>
+          <div class="title">${tenant?.name || 'E-COMMERCE'}</div>
           <div class="subtitle">ETIQUETA DE ENVIO / PRODUÇÃO</div>
           <div class="title" style="margin-top:5px;">PEDIDO #${order.id}</div>
         </div>
@@ -88,7 +88,8 @@ export default function FilaProducao() {
           ${itemsList.map(it => `
             <div class="item">
               <b>${it.quantity}x ${it.name}</b><br/>
-              &nbsp;&nbsp;• Tam: <b>${it.size || 'G'}</b><br/>
+              ${it.variationsText ? `&nbsp;&nbsp;• Opt: <b>${it.variationsText}</b><br/>` : (it.size ? `&nbsp;&nbsp;• Tam: <b>${it.size}</b><br/>` : '')}
+              ${it.note ? `&nbsp;&nbsp;• Obs: <i>"${it.note}"</i><br/>` : ''}
               &nbsp;&nbsp;• Valor: R$ ${(Number(it.price) * Number(it.quantity)).toFixed(2)}
             </div>
           `).join('')}
@@ -126,10 +127,10 @@ export default function FilaProducao() {
     <div className="min-h-screen bg-gray-950 text-white p-4 font-sans pb-16">
       <header className="flex justify-between items-center py-4 border-b border-gray-800 mb-6 max-w-7xl mx-auto">
         <div className="flex items-center space-x-3">
-          <div className="w-10 h-10 rounded-2xl bg-blue-600 flex items-center justify-center font-bold text-xl text-white">👕</div>
+          <div className="w-10 h-10 rounded-2xl bg-blue-600 flex items-center justify-center font-bold text-xl text-white">🛍️</div>
           <div>
             <h1 className="font-bold text-lg text-white">Fila de Produção — {tenant?.name}</h1>
-            <p className="text-xs text-gray-400">Acompanhe a estamparia, confecção e envio dos pedidos</p>
+            <p className="text-xs text-gray-400">Acompanhe a confecção, separação e envio dos pedidos em tempo real</p>
           </div>
         </div>
         <button onClick={fetchData} className="bg-orange-500 hover:bg-orange-600 text-white text-xs font-bold px-4 py-2 rounded-xl transition">
@@ -165,17 +166,27 @@ export default function FilaProducao() {
                 <p className="text-blue-400 text-[11px]"><b>Envio:</b> {o.neighborhood || 'Envio Padrão'}</p>
               </div>
 
-              <div className="space-y-1 border-t border-gray-800 pt-2 text-xs">
+              <div className="space-y-1.5 border-t border-gray-800 pt-2 text-xs">
                 {Array.isArray(o.items) && o.items.map((it, idx) => (
-                  <div key={idx} className="flex justify-between text-gray-200">
-                    <span><b>{it.quantity}x</b> {it.name} (Tam: <b>{it.size}</b>)</span>
-                    <span className="font-bold">R$ {(Number(it.price) * Number(it.quantity)).toFixed(2)}</span>
+                  <div key={idx} className="bg-gray-900/60 p-2 rounded-lg border border-gray-800/50">
+                    <div className="flex justify-between text-gray-200">
+                      <span><b>{it.quantity}x</b> {it.name}</span>
+                      <span className="font-bold">R$ {(Number(it.price) * Number(it.quantity)).toFixed(2)}</span>
+                    </div>
+                    {(it.variationsText || it.size) && (
+                      <p className="text-[10px] text-orange-400 font-semibold mt-0.5">
+                        Opt: {it.variationsText || it.size}
+                      </p>
+                    )}
+                    {it.note && (
+                      <p className="text-[10px] text-gray-400 italic">Obs: "{it.note}"</p>
+                    )}
                   </div>
                 ))}
               </div>
 
               <div className="flex justify-between items-center pt-2 border-t border-gray-800 text-xs">
-                <span className="font-bold text-green-400">TOTAL: R$ {Number(o.total).toFixed(2)}</span>
+                <span className="font-bold text-green-400">TOTAL: R$ {Number(o.total || 0).toFixed(2)}</span>
                 <div className="flex space-x-1.5">
                   <button onClick={() => handlePrintOrder(o)} className="bg-gray-800 hover:bg-gray-700 text-gray-200 px-2.5 py-1 rounded-lg font-bold text-[11px] border border-gray-700">
                     🖨️
@@ -187,7 +198,7 @@ export default function FilaProducao() {
               </div>
 
               <button onClick={() => updateOrderStatus(o.id, 'em_producao')} className="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-2.5 rounded-xl text-xs transition">
-                👕 Iniciar Estamparia / Confecção ➔
+                🚀 Iniciar Produção / Separação ➔
               </button>
             </div>
           ))}
@@ -196,7 +207,7 @@ export default function FilaProducao() {
         {/* COLUNA 2: EM PRODUÇÃO */}
         <div className="bg-gray-900 border border-gray-800 rounded-3xl p-4 space-y-3">
           <h2 className="font-bold text-xs text-blue-400 uppercase tracking-wider flex justify-between items-center border-b border-gray-800 pb-2">
-            <span>👕 2. Em Estamparia / Corte ({emProducao.length})</span>
+            <span>⚙️ 2. Em Produção / Separação ({emProducao.length})</span>
           </h2>
 
           {emProducao.map(o => (
@@ -214,13 +225,13 @@ export default function FilaProducao() {
               <div className="space-y-1 border-t border-gray-800 pt-2 text-xs">
                 {Array.isArray(o.items) && o.items.map((it, idx) => (
                   <div key={idx} className="flex justify-between text-gray-200">
-                    <span><b>{it.quantity}x</b> {it.name} (Tam: <b>{it.size}</b>)</span>
+                    <span><b>{it.quantity}x</b> {it.name} {it.variationsText ? `(${it.variationsText})` : (it.size ? `(${it.size})` : '')}</span>
                   </div>
                 ))}
               </div>
 
               <div className="flex justify-between items-center pt-2 border-t border-gray-800 text-xs">
-                <span className="font-bold text-green-400">R$ {Number(o.total).toFixed(2)}</span>
+                <span className="font-bold text-green-400">R$ {Number(o.total || 0).toFixed(2)}</span>
                 <div className="flex space-x-1.5">
                   <button onClick={() => handlePrintOrder(o)} className="bg-gray-800 hover:bg-gray-700 text-gray-200 px-2.5 py-1 rounded-lg font-bold text-[11px] border border-gray-700">
                     🖨️
