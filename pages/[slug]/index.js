@@ -9,6 +9,7 @@ export default function EcommerceCliente() {
   const [tenant, setTenant] = useState(null);
   const [categories, setCategories] = useState([]);
   const [products, setProducts] = useState([]);
+  const [neighborhoods, setNeighborhoods] = useState([]);
   const [selectedCat, setSelectedCat] = useState('ALL');
   const [loading, setLoading] = useState(true);
 
@@ -26,11 +27,17 @@ export default function EcommerceCliente() {
   const [cart, setCart] = useState([]);
   const [showCartModal, setShowCartModal] = useState(false);
   const [deliveryType, setDeliveryType] = useState('ENTREGA');
+  const [selectedNeighId, setSelectedNeighId] = useState('');
   const [customerName, setCustomerName] = useState('');
   const [customerPhone, setCustomerPhone] = useState('');
   const [customerAddress, setCustomerAddress] = useState('');
   const [paymentMethod, setPaymentMethod] = useState('PIX');
   const [isSubmitting, setIsSubmitting] = useState(false);
+
+  // CUPOM DE DESCONTO
+  const [couponInput, setCouponInput] = useState('');
+  const [appliedCoupon, setAppliedCoupon] = useState(null);
+  const [couponMessage, setCouponMessage] = useState({ type: '', text: '' });
 
   useEffect(() => {
     if (router.isReady && slug) {
@@ -69,9 +76,11 @@ export default function EcommerceCliente() {
 
       const { data: cData } = await supabase.from('categories').select('*').eq('tenant_id', tData.id).order('id', { ascending: true });
       const { data: pData } = await supabase.from('products').select('*').eq('tenant_id', tData.id).eq('active', true).order('id', { ascending: true });
+      const { data: nData } = await supabase.from('neighborhoods').select('*').eq('tenant_id', tData.id).order('id', { ascending: true });
 
       if (cData) setCategories(cData);
       if (pData) setProducts(pData);
+      if (nData) setNeighborhoods(nData);
     }
     setLoading(false);
   };
@@ -141,6 +150,28 @@ export default function EcommerceCliente() {
     setCart(cart.filter(item => item.cartItemId !== cartItemId));
   };
 
+  const handleApplyCoupon = async (e) => {
+    e.preventDefault();
+    if (!couponInput.trim()) return;
+
+    const cleanCode = couponInput.trim().toUpperCase();
+    const { data: cpData, error: cpErr } = await supabase
+      .from('coupons')
+      .select('*')
+      .eq('tenant_id', tenant.id)
+      .ilike('code', cleanCode)
+      .eq('active', true)
+      .maybeSingle();
+
+    if (cpErr || !cpData) {
+      setAppliedCoupon(null);
+      setCouponMessage({ type: 'error', text: 'Cupom inválido ou expirado.' });
+    } else {
+      setAppliedCoupon(cpData);
+      setCouponMessage({ type: 'success', text: `Cupom "${cpData.code}" aplicado com sucesso!` });
+    }
+  };
+
   if (loading) return <div className="min-h-screen bg-gray-950 text-white flex items-center justify-center font-sans"><p className="text-xs text-gray-400">Carregando loja...</p></div>;
   if (!tenant) return <div className="min-h-screen bg-gray-950 text-white flex items-center justify-center font-sans"><h1 className="text-xl font-bold text-orange-500">Loja não encontrada</h1></div>;
 
@@ -155,10 +186,25 @@ export default function EcommerceCliente() {
   const freeThreshold = Number(tenant.free_shipping_threshold ?? 0.00);
   const allowPickup = tenant.enable_pickup ?? true;
 
+  const selectedNeighborhood = neighborhoods.find(n => String(n.id) === String(selectedNeighId));
+  const activeShippingFee = selectedNeighborhood ? Number(selectedNeighborhood.fee) : defaultFee;
+
   const subtotal = cart.reduce((sum, item) => sum + (Number(item.price) * item.quantity), 0);
   const isFreeShipping = freeThreshold > 0 && subtotal >= freeThreshold;
-  const currentFee = deliveryType === 'RETIRADA' ? 0 : (isFreeShipping ? 0 : defaultFee);
-  const total = subtotal + currentFee;
+  const currentFee = deliveryType === 'RETIRADA' ? 0 : (isFreeShipping ? 0 : activeShippingFee);
+
+  // CÁLCULO DE DESCONTO DO CUPOM
+  let discountValue = 0;
+  if (appliedCoupon) {
+    if (appliedCoupon.discount_type === 'percent') {
+      discountValue = (subtotal * Number(appliedCoupon.discount_value)) / 100;
+    } else {
+      discountValue = Number(appliedCoupon.discount_value);
+    }
+    if (discountValue > subtotal) discountValue = subtotal;
+  }
+
+  const total = Math.max(0, subtotal - discountValue + currentFee);
 
   // FILTRAGEM COM SUPORTE PARA A ABA 'OFFERS' (🔥 PROMOÇÕES)
   const promoProductsCount = products.filter(p => p.original_price && Number(p.original_price) > Number(p.price)).length;
@@ -181,12 +227,16 @@ export default function EcommerceCliente() {
 
     setIsSubmitting(true);
 
+    const neighborhoodLabel = deliveryType === 'ENTREGA' 
+      ? (selectedNeighborhood ? selectedNeighborhood.name : (isFreeShipping ? 'Entrega em Casa (Frete Grátis)' : 'Entrega em Casa'))
+      : 'Retirar na Loja';
+
     const orderPayload = {
       tenant_id: tenant.id,
       customer_name: customerName,
       customer_phone: customerPhone,
       address: deliveryType === 'ENTREGA' ? customerAddress : 'Retirada na Loja',
-      neighborhood: deliveryType === 'ENTREGA' ? (isFreeShipping ? 'Entrega em Casa (Frete Grátis)' : 'Entrega em Casa') : 'Retirar na Loja',
+      neighborhood: neighborhoodLabel,
       items: cart.map(i => ({
         id: i.id,
         name: i.name,
@@ -229,9 +279,12 @@ export default function EcommerceCliente() {
 
     let msg = `*NOVA COMPRA NA LOJA${orderTag} - ${tenant.name.toUpperCase()}*\n\n`;
     msg += `*Cliente:* ${customerName}\n*Telefone:* ${customerPhone}\n`;
-    msg += `*Tipo:* ${deliveryType === 'ENTREGA' ? `Entrega em: ${customerAddress}` : 'Retirar na Loja'}\n\n`;
+    msg += `*Tipo:* ${deliveryType === 'ENTREGA' ? `Entrega em: ${customerAddress} (${neighborhoodLabel})` : 'Retirar na Loja'}\n\n`;
     msg += `*ITENS COMPRADOS:*\n${itemsText}\n\n`;
     msg += `*Subtotal:* R$ ${subtotal.toFixed(2)}\n`;
+    if (discountValue > 0) {
+      msg += `*Desconto (${appliedCoupon.code}):* -R$ ${discountValue.toFixed(2)}\n`;
+    }
     msg += `*Frete/Envio:* ${currentFee === 0 ? (deliveryType === 'RETIRADA' ? 'Grátis (Retirada)' : 'FRETE GRÁTIS 🎉') : `R$ ${currentFee.toFixed(2)}`}\n`;
     msg += `*TOTAL:* *R$ ${total.toFixed(2)}*\n`;
     msg += `*Forma de Pagamento:* ${paymentMethod}`;
@@ -399,7 +452,7 @@ export default function EcommerceCliente() {
             className="w-full font-bold p-3.5 rounded-2xl flex justify-between items-center shadow-2xl transition hover:opacity-95">
             <span className="text-xs bg-black/20 px-2.5 py-1 rounded-lg">🛍️ {cart.reduce((a, b) => a + b.quantity, 0)} itens</span>
             <span className="text-xs font-bold uppercase tracking-wider">Finalizar Compra</span>
-            <span className="text-xs font-bold">R$ {subtotal.toFixed(2)}</span>
+            <span className="text-xs font-bold">R$ {total.toFixed(2)}</span>
           </button>
         </div>
       )}
@@ -538,7 +591,7 @@ export default function EcommerceCliente() {
         </div>
       )}
 
-      {/* MODAL DO CARRINHO */}
+      {/* MODAL DO CARRINHO & CHECKOUT */}
       {showCartModal && (
         <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 p-4">
           <div style={{ backgroundColor: cardColor, color: textColor }} className="border border-white/10 w-full max-w-sm rounded-2xl p-5 space-y-4 shadow-2xl max-h-[90vh] overflow-y-auto">
@@ -582,6 +635,32 @@ export default function EcommerceCliente() {
               ))}
             </div>
 
+            {/* APLICAR CUPOM DE DESCONTO */}
+            <form onSubmit={handleApplyCoupon} className="pt-2 border-t border-white/10 space-y-1.5">
+              <label className="text-[11px] opacity-70 block">🎟️ Possui um Cupom de Desconto?</label>
+              <div className="flex space-x-2">
+                <input
+                  type="text"
+                  placeholder="Ex: PRIMEIRA10"
+                  value={couponInput}
+                  onChange={(e) => setCouponInput(e.target.value)}
+                  style={{ backgroundColor: bgColor, color: textColor }}
+                  className="flex-1 uppercase border border-white/10 p-2 rounded-xl text-xs focus:outline-none"
+                />
+                <button
+                  type="submit"
+                  style={{ backgroundColor: primaryColor, color: btnTextColor }}
+                  className="px-3 py-2 rounded-xl text-xs font-bold transition">
+                  Aplicar
+                </button>
+              </div>
+              {couponMessage.text && (
+                <p className={`text-[10px] font-bold ${couponMessage.type === 'success' ? 'text-green-400' : 'text-red-400'}`}>
+                  {couponMessage.text}
+                </p>
+              )}
+            </form>
+
             <form onSubmit={handleFinishOrder} className="space-y-3 pt-2 border-t border-white/10">
               <div className="flex space-x-2">
                 <button
@@ -592,7 +671,7 @@ export default function EcommerceCliente() {
                     color: deliveryType === 'ENTREGA' ? btnTextColor : textColor
                   }}
                   className={`py-2 rounded-xl text-xs font-bold border border-white/10 ${allowPickup ? 'w-1/2' : 'w-full'}`}>
-                  🛵 Entrega {isFreeShipping ? '(GRÁTIS)' : `(R$ ${defaultFee.toFixed(2)})`}
+                  🛵 Entrega {isFreeShipping ? '(GRÁTIS)' : `(R$ ${activeShippingFee.toFixed(2)})`}
                 </button>
 
                 {allowPickup && (
@@ -608,6 +687,23 @@ export default function EcommerceCliente() {
                   </button>
                 )}
               </div>
+
+              {/* OPÇÕES DE FRETE / BAIRRO DO ADMIN */}
+              {deliveryType === 'ENTREGA' && neighborhoods.length > 0 && (
+                <div>
+                  <label className="text-[11px] opacity-70 block mb-1">Selecione a Região / Bairro de Entrega:</label>
+                  <select
+                    value={selectedNeighId}
+                    onChange={(e) => setSelectedNeighId(e.target.value)}
+                    style={{ backgroundColor: bgColor, color: textColor }}
+                    className="w-full border border-white/10 p-2.5 rounded-xl text-xs focus:outline-none">
+                    <option value="">Taxa Padrão de Entrega (R$ {defaultFee.toFixed(2)})</option>
+                    {neighborhoods.map(n => (
+                      <option key={n.id} value={n.id}>{n.name} — R$ {Number(n.fee).toFixed(2)}</option>
+                    ))}
+                  </select>
+                </div>
+              )}
 
               <div>
                 <label className="text-[11px] opacity-70 block mb-1">Seu Nome:</label>
@@ -638,6 +734,14 @@ export default function EcommerceCliente() {
 
               <div style={{ backgroundColor: bgColor }} className="p-3 rounded-xl border border-white/10 space-y-1 text-xs">
                 <div className="flex justify-between"><span className="opacity-60">Subtotal:</span><span>R$ {subtotal.toFixed(2)}</span></div>
+                
+                {discountValue > 0 && (
+                  <div className="flex justify-between text-green-400 font-bold">
+                    <span>Desconto ({appliedCoupon?.code}):</span>
+                    <span>-R$ {discountValue.toFixed(2)}</span>
+                  </div>
+                )}
+
                 <div className="flex justify-between">
                   <span className="opacity-60">Taxa de Frete/Envio:</span>
                   <span>
@@ -646,7 +750,11 @@ export default function EcommerceCliente() {
                       : (isFreeShipping ? '🎉 FRETE GRÁTIS' : `R$ ${currentFee.toFixed(2)}`)}
                   </span>
                 </div>
-                <div className="flex justify-between font-bold text-sm pt-1 border-t border-white/10"><span style={{ color: primaryColor }}>TOTAL:</span><span style={{ color: primaryColor }}>R$ {total.toFixed(2)}</span></div>
+
+                <div className="flex justify-between font-bold text-sm pt-1 border-t border-white/10">
+                  <span style={{ color: primaryColor }}>TOTAL:</span>
+                  <span style={{ color: primaryColor }}>R$ {total.toFixed(2)}</span>
+                </div>
               </div>
 
               <button
