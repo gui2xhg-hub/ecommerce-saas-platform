@@ -29,6 +29,7 @@ export default function AdminTenant() {
   const [newProd, setNewProd] = useState({ 
     name: '', 
     price: '', 
+    original_price: '',
     category_id: '', 
     description: '', 
     image: '',
@@ -250,6 +251,7 @@ export default function AdminTenant() {
     }
 
     const formattedPrice = parseFloat(String(newProd.price).replace(',', '.'));
+    const formattedOrigPrice = newProd.original_price ? parseFloat(String(newProd.original_price).replace(',', '.')) : null;
     const mainImage = newProd.image || (newProd.images_json && newProd.images_json[0]) || 'https://images.unsplash.com/photo-1521572267360-ee0c2909d518?w=300&auto=format&fit=crop&q=80';
 
     const { error } = await supabase.from('products').insert([{
@@ -258,6 +260,7 @@ export default function AdminTenant() {
       name: newProd.name.trim(),
       description: newProd.description,
       price: formattedPrice,
+      original_price: formattedOrigPrice,
       image: mainImage,
       images_json: newProd.images_json || [mainImage],
       variations_json: newProd.variations_json || [],
@@ -271,6 +274,7 @@ export default function AdminTenant() {
       setNewProd({ 
         name: '', 
         price: '', 
+        original_price: '',
         category_id: categories[0]?.id || '', 
         description: '', 
         image: '', 
@@ -284,11 +288,13 @@ export default function AdminTenant() {
   const handleUpdateProduct = async (e) => {
     e.preventDefault();
     const formattedPrice = parseFloat(String(editingProduct.price).replace(',', '.'));
+    const formattedOrigPrice = editingProduct.original_price ? parseFloat(String(editingProduct.original_price).replace(',', '.')) : null;
     const mainImage = editingProduct.image || (editingProduct.images_json && editingProduct.images_json[0]) || '';
 
     const { error } = await supabase.from('products').update({
       name: editingProduct.name.trim(),
       price: formattedPrice,
+      original_price: formattedOrigPrice,
       description: editingProduct.description,
       category_id: parseInt(editingProduct.category_id),
       image: mainImage,
@@ -489,14 +495,26 @@ export default function AdminTenant() {
               <input type="text" placeholder="Nome do Produto (Ex: Sérum Facial, Camisa Oversized, Vaso Decorativo)" value={newProd.name} className="w-full bg-gray-950 border border-gray-800 p-3 rounded-xl text-xs text-white focus:outline-none" onChange={(e) => setNewProd({ ...newProd, name: e.target.value })} />
               <input type="text" placeholder="Descrição detalhada do produto" value={newProd.description} className="w-full bg-gray-950 border border-gray-800 p-3 rounded-xl text-xs text-white focus:outline-none" onChange={(e) => setNewProd({ ...newProd, description: e.target.value })} />
               
-              <div className="flex space-x-2">
-                <input type="text" placeholder="Preço R$" value={newProd.price} className="w-1/2 bg-gray-950 border border-gray-800 p-3 rounded-xl text-xs text-white focus:outline-none" onChange={(e) => setNewProd({ ...newProd, price: e.target.value })} />
-                <select 
-                  value={newProd.category_id || (categories[0]?.id || '')} 
-                  className="w-1/2 bg-gray-950 border border-gray-800 p-3 rounded-xl text-xs text-white focus:outline-none" 
-                  onChange={(e) => setNewProd({ ...newProd, category_id: e.target.value })}>
-                  {categories.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-                </select>
+              <div className="grid grid-cols-3 gap-2">
+                <div>
+                  <label className="text-[10px] text-gray-400 block mb-1">Preço Normal (R$):</label>
+                  <input type="text" placeholder="Preço R$" value={newProd.price} className="w-full bg-gray-950 border border-gray-800 p-3 rounded-xl text-xs text-white focus:outline-none" onChange={(e) => setNewProd({ ...newProd, price: e.target.value })} />
+                </div>
+
+                <div>
+                  <label className="text-[10px] text-red-400 font-bold block mb-1">🔥 Preço Antigo / De (R$):</label>
+                  <input type="text" placeholder="Ex: 120.00" value={newProd.original_price} className="w-full bg-gray-950 border border-red-500/30 p-3 rounded-xl text-xs text-white focus:outline-none" onChange={(e) => setNewProd({ ...newProd, original_price: e.target.value })} />
+                </div>
+
+                <div>
+                  <label className="text-[10px] text-gray-400 block mb-1">Categoria:</label>
+                  <select 
+                    value={newProd.category_id || (categories[0]?.id || '')} 
+                    className="w-full bg-gray-950 border border-gray-800 p-3 rounded-xl text-xs text-white focus:outline-none" 
+                    onChange={(e) => setNewProd({ ...newProd, category_id: e.target.value })}>
+                    {categories.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                  </select>
+                </div>
               </div>
 
               <div className="bg-gray-950 p-3.5 rounded-2xl border border-gray-800 space-y-3">
@@ -582,23 +600,34 @@ export default function AdminTenant() {
 
           <section className="space-y-3">
             <h3 className="font-bold text-sm text-gray-300">📋 Produtos Cadastrados ({products.length})</h3>
-            {products.map((item) => (
-              <div key={item.id} className="bg-gray-900 p-3.5 rounded-2xl border border-gray-800 flex justify-between items-center shadow-md">
-                <div className="flex items-center space-x-3">
-                  {item.image && <img src={item.image} alt={item.name} className="w-10 h-10 rounded-xl object-cover bg-gray-950" />}
-                  <div>
-                    <span className={`font-bold text-xs block ${!item.active ? 'line-through text-gray-500' : 'text-white'}`}>{item.name}</span>
-                    <span className="text-xs text-blue-400 font-bold">R$ {Number(item.price).toFixed(2)}</span>
+            {products.map((item) => {
+              const hasPromo = item.original_price && Number(item.original_price) > Number(item.price);
+              const discPercent = hasPromo ? Math.round(((Number(item.original_price) - Number(item.price)) / Number(item.original_price)) * 100) : 0;
+
+              return (
+                <div key={item.id} className="bg-gray-900 p-3.5 rounded-2xl border border-gray-800 flex justify-between items-center shadow-md">
+                  <div className="flex items-center space-x-3">
+                    {item.image && <img src={item.image} alt={item.name} className="w-10 h-10 rounded-xl object-cover bg-gray-950" />}
+                    <div>
+                      <div className="flex items-center space-x-2">
+                        <span className={`font-bold text-xs block ${!item.active ? 'line-through text-gray-500' : 'text-white'}`}>{item.name}</span>
+                        {hasPromo && <span className="bg-red-500/20 text-red-400 border border-red-500/30 text-[9px] font-bold px-1.5 py-0.5 rounded-md">🔥 -{discPercent}% OFF</span>}
+                      </div>
+                      <div className="flex items-center space-x-2">
+                        <span className="text-xs text-blue-400 font-bold">R$ {Number(item.price).toFixed(2)}</span>
+                        {hasPromo && <span className="text-[10px] text-gray-500 line-through">R$ {Number(item.original_price).toFixed(2)}</span>}
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center space-x-1.5">
+                    <button onClick={() => setEditingProduct({ ...item, images_json: item.images_json || (item.image ? [item.image] : []), variations_json: item.variations_json || [] })} className="text-xs bg-blue-600/20 text-blue-400 px-3 py-1.5 rounded-xl font-bold border border-blue-500/30">✏️ Editar</button>
+                    <button onClick={async () => { await supabase.from('products').update({ active: !item.active }).eq('id', item.id); fetchData(); }} className={`text-[10px] font-bold px-2.5 py-1.5 rounded-xl ${item.active ? 'bg-green-500/20 text-green-400 border border-green-500/30' : 'bg-yellow-500/20 text-yellow-400 border border-yellow-500/30'}`}>{item.active ? 'Ativo' : 'Pausado'}</button>
+                    <button onClick={async () => { if (confirm("Deseja excluir este produto?")) { await supabase.from('products').delete().eq('id', item.id); fetchData(); } }} className="text-xs bg-red-500/20 text-red-400 px-2.5 py-1.5 rounded-xl font-bold border border-red-500/30">🗑</button>
                   </div>
                 </div>
-
-                <div className="flex items-center space-x-1.5">
-                  <button onClick={() => setEditingProduct({ ...item, images_json: item.images_json || (item.image ? [item.image] : []), variations_json: item.variations_json || [] })} className="text-xs bg-blue-600/20 text-blue-400 px-3 py-1.5 rounded-xl font-bold border border-blue-500/30">✏️ Editar</button>
-                  <button onClick={async () => { await supabase.from('products').update({ active: !item.active }).eq('id', item.id); fetchData(); }} className={`text-[10px] font-bold px-2.5 py-1.5 rounded-xl ${item.active ? 'bg-green-500/20 text-green-400 border border-green-500/30' : 'bg-yellow-500/20 text-yellow-400 border border-yellow-500/30'}`}>{item.active ? 'Ativo' : 'Pausado'}</button>
-                  <button onClick={async () => { if (confirm("Deseja excluir este produto?")) { await supabase.from('products').delete().eq('id', item.id); fetchData(); } }} className="text-xs bg-red-500/20 text-red-400 px-2.5 py-1.5 rounded-xl font-bold border border-red-500/30">🗑</button>
-                </div>
-              </div>
-            ))}
+              );
+            })}
           </section>
         </div>
       )}
@@ -835,7 +864,6 @@ export default function AdminTenant() {
                 </select>
               </div>
 
-              {/* LINK DO INSTAGRAM */}
               <div>
                 <label className="text-[11px] text-gray-400 block mb-1">Link do Instagram:</label>
                 <input 
@@ -899,7 +927,6 @@ export default function AdminTenant() {
                 <input type="text" value={tenant.whatsapp || ''} className="w-full bg-gray-950 border border-gray-800 p-3 rounded-xl text-xs text-white focus:outline-none" onChange={(e) => setTenant({ ...tenant, whatsapp: e.target.value })} />
               </div>
 
-              {/* INTEGRACAO PIX DINÂMICO AUTOMÁTICO */}
               <div className="pt-3 border-t border-gray-800 space-y-3">
                 <div className="flex justify-between items-center">
                   <div>
@@ -986,12 +1013,21 @@ export default function AdminTenant() {
             <input type="text" value={editingProduct.name} onChange={(e) => setEditingProduct({ ...editingProduct, name: e.target.value })} className="w-full bg-gray-950 border border-gray-800 p-3 rounded-xl text-xs text-white focus:outline-none" />
             <input type="text" value={editingProduct.description || ''} onChange={(e) => setEditingProduct({ ...editingProduct, description: e.target.value })} className="w-full bg-gray-950 border border-gray-800 p-3 rounded-xl text-xs text-white focus:outline-none" />
             
-            <div className="flex space-x-2">
-              <input type="text" value={editingProduct.price} onChange={(e) => setEditingProduct({ ...editingProduct, price: e.target.value })} className="w-1/2 bg-gray-950 border border-gray-800 p-3 rounded-xl text-xs text-white focus:outline-none" />
-              <select value={editingProduct.category_id} onChange={(e) => setEditingProduct({ ...editingProduct, category_id: e.target.value })} className="w-1/2 bg-gray-950 border border-gray-800 p-3 rounded-xl text-xs text-white focus:outline-none">
-                {categories.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-              </select>
+            <div className="grid grid-cols-2 gap-2">
+              <div>
+                <label className="text-[10px] text-gray-400 block mb-1">Preço Normal (R$):</label>
+                <input type="text" value={editingProduct.price} onChange={(e) => setEditingProduct({ ...editingProduct, price: e.target.value })} className="w-full bg-gray-950 border border-gray-800 p-3 rounded-xl text-xs text-white focus:outline-none" />
+              </div>
+
+              <div>
+                <label className="text-[10px] text-red-400 font-bold block mb-1">🔥 Preço Antigo / De (R$):</label>
+                <input type="text" placeholder="Ex: 120.00" value={editingProduct.original_price || ''} onChange={(e) => setEditingProduct({ ...editingProduct, original_price: e.target.value })} className="w-full bg-gray-950 border border-red-500/30 p-3 rounded-xl text-xs text-white focus:outline-none" />
+              </div>
             </div>
+
+            <select value={editingProduct.category_id} onChange={(e) => setEditingProduct({ ...editingProduct, category_id: e.target.value })} className="w-full bg-gray-950 border border-gray-800 p-3 rounded-xl text-xs text-white focus:outline-none">
+              {categories.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+            </select>
 
             <div className="bg-gray-950 p-3.5 rounded-2xl border border-gray-800 space-y-3">
               <label className="text-xs font-bold text-blue-400 block">🖼️ Galeria de Fotos do Produto</label>
