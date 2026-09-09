@@ -15,9 +15,8 @@ export default function FilaProducao() {
     if (router.isReady && slug) {
       fetchData();
 
-      // INSCRIÇÃO REALTIME NO SUPABASE PARA ATUALIZAÇÃO INSTANTÂNEA
       const channel = supabase
-        .channel('realtime_orders_page')
+        .channel('realtime_orders_queue')
         .on(
           'postgres_changes',
           { event: '*', schema: 'public', table: 'orders' },
@@ -38,26 +37,24 @@ export default function FilaProducao() {
 
   const fetchData = async () => {
     try {
-      const cleanSlug = String(slug).toLowerCase().trim();
-      
-      // BUSCA O TENANT (USANDO MAYBESINGLE PARA EVITAR FAILS SILENCIOSOS)
+      const cleanSlug = String(slug).trim();
+
+      // BUSCA O TENANT USANDO ILIKE (CASE INSENSITIVE)
       const { data: tData, error: tError } = await supabase
         .from('tenants')
         .select('*')
-        .eq('slug', cleanSlug)
+        .ilike('slug', cleanSlug)
         .maybeSingle();
 
       if (tError) {
-        console.error("Erro ao buscar tenant:", tError.message);
-        setErrorMessage("Erro ao localizar loja: " + tError.message);
+        setErrorMessage("Erro ao buscar dados da loja: " + tError.message);
         setLoading(false);
         return;
       }
 
       if (tData) {
         setTenant(tData);
-        
-        // BUSCA TODOS OS PEDIDOS
+
         const { data: oData, error: oError } = await supabase
           .from('orders')
           .select('*')
@@ -65,8 +62,7 @@ export default function FilaProducao() {
           .order('id', { ascending: false });
 
         if (oError) {
-          console.error("Erro ao buscar pedidos:", oError.message);
-          setErrorMessage("Erro no Supabase ao buscar pedidos: " + oError.message);
+          setErrorMessage("Erro ao buscar pedidos no Supabase: " + oError.message);
         } else if (oData) {
           setOrders(oData);
           setErrorMessage('');
@@ -75,8 +71,7 @@ export default function FilaProducao() {
         setErrorMessage(`Loja com o slug "${cleanSlug}" não foi encontrada no banco de dados.`);
       }
     } catch (err) {
-      console.error("Exceção ao buscar dados:", err);
-      setErrorMessage("Erro na aplicação: " + err.message);
+      setErrorMessage("Erro inesperado: " + err.message);
     } finally {
       setLoading(false);
     }
@@ -193,7 +188,6 @@ export default function FilaProducao() {
         </button>
       </header>
 
-      {/* PAINEL DE AVISO DE ERRO */}
       {errorMessage && (
         <div className="max-w-7xl mx-auto mb-6 bg-red-500/20 border border-red-500/40 p-4 rounded-2xl text-xs text-red-300 font-bold flex justify-between items-center">
           <span>⚠️ {errorMessage}</span>
@@ -201,10 +195,9 @@ export default function FilaProducao() {
         </div>
       )}
 
-      {/* COLUNAS DE PRODUÇÃO */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4 max-w-7xl mx-auto">
         
-        {/* COLUNA 1: PEDIDOS NOVOS */}
+        {/* COLUNA 1: NOVAS ENCOMENDAS */}
         <div className="bg-gray-900 border border-gray-800 rounded-3xl p-4 space-y-3">
           <h2 className="font-bold text-xs text-yellow-400 uppercase tracking-wider flex justify-between items-center border-b border-gray-800 pb-2">
             <span>🟡 1. Novas Encomendas ({novos.length})</span>
