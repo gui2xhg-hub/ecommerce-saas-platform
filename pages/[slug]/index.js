@@ -12,12 +12,12 @@ export default function EcommerceCliente() {
   const [selectedCat, setSelectedCat] = useState('ALL');
   const [loading, setLoading] = useState(true);
 
-  // LISTA DE TAMANHOS DE ROUPA PADRÃO
-  const AVAILABLE_SIZES = ['P', 'M', 'G', 'GG', 'XG'];
+  // LISTA DE TAMANHOS DE ROUPA PADRÃO (FALLBACK PARA VESTUÁRIO/FASHION)
+  const DEFAULT_FASHION_SIZES = ['P', 'M', 'G', 'GG', 'XG'];
 
-  // MODAL DE DETALHES DO PRODUTO (TAMANHO E OBSERVAÇÃO)
+  // MODAL DE DETALHES DO PRODUTO (VARIAÇÕES DINÂMICAS E OBSERVAÇÃO)
   const [selectedProduct, setSelectedProduct] = useState(null);
-  const [selectedSize, setSelectedSize] = useState('M');
+  const [selectedVariations, setSelectedVariations] = useState({});
   const [productQuantity, setProductQuantity] = useState(1);
   const [productNote, setProductNote] = useState('');
 
@@ -70,19 +70,45 @@ export default function EcommerceCliente() {
 
   const handleOpenProductModal = (product) => {
     setSelectedProduct(product);
-    setSelectedSize('M');
     setProductQuantity(1);
     setProductNote('');
+
+    // INICIALIZA VARIAÇÕES DINÂMICAS OU FALLBACK DE ROUPAS
+    const initialVars = {};
+    if (product.variations_json && Array.isArray(product.variations_json) && product.variations_json.length > 0) {
+      product.variations_json.forEach(v => {
+        if (v.attribute_name && v.options && v.options.length > 0) {
+          initialVars[v.attribute_name] = v.options[0];
+        }
+      });
+    } else if (tenant?.niche === 'fashion' || !tenant?.niche) {
+      // Caso seja loja de roupas ou padrão, usa tamanho Padrão
+      initialVars['Tamanho'] = 'M';
+    }
+
+    setSelectedVariations(initialVars);
+  };
+
+  const handleSelectVariation = (attrName, optionValue) => {
+    setSelectedVariations(prev => ({
+      ...prev,
+      [attrName]: optionValue
+    }));
   };
 
   const handleAddProductToCart = () => {
     if (!selectedProduct) return;
 
+    // Converte variações em texto legível
+    const variationEntries = Object.entries(selectedVariations);
+    const variationsText = variationEntries.map(([key, val]) => `${key}: ${val}`).join(' | ');
+
     const cartItem = {
-      cartItemId: `${selectedProduct.id}-${selectedSize}-${Date.now()}`,
+      cartItemId: `${selectedProduct.id}-${JSON.stringify(selectedVariations)}-${Date.now()}`,
       id: selectedProduct.id,
       name: selectedProduct.name,
-      size: selectedSize,
+      variations: selectedVariations,
+      variationsText: variationsText,
       price: Number(selectedProduct.price),
       quantity: productQuantity,
       note: productNote,
@@ -94,7 +120,7 @@ export default function EcommerceCliente() {
 
     if (window.fbq) {
       window.fbq('track', 'AddToCart', {
-        content_name: `${selectedProduct.name} (${selectedSize})`,
+        content_name: `${selectedProduct.name} ${variationsText ? `(${variationsText})` : ''}`,
         value: Number(selectedProduct.price) * productQuantity,
         currency: 'BRL'
       });
@@ -108,7 +134,7 @@ export default function EcommerceCliente() {
   if (loading) return <div className="min-h-screen bg-gray-950 text-white flex items-center justify-center font-sans"><p className="text-xs text-gray-400">Carregando loja...</p></div>;
   if (!tenant) return <div className="min-h-screen bg-gray-950 text-white flex items-center justify-center font-sans"><h1 className="text-xl font-bold text-orange-500">Loja não encontrada</h1></div>;
 
-  // VARIÁVEIS DE CORES DINÂMICAS DO MASTER
+  // VARIÁVEIS DE CORES DINÂMICAS
   const primaryColor = tenant.primary_color || '#FF8C00';
   const btnTextColor = tenant.button_text_color || '#FFFFFF';
   const bgColor = tenant.background_color || tenant.secondary_color || '#090D16';
@@ -136,7 +162,8 @@ export default function EcommerceCliente() {
     }
 
     let itemsText = cart.map(i => {
-      let txt = `• ${i.quantity}x ${i.name} [Tamanho: ${i.size}] (R$ ${(Number(i.price) * i.quantity).toFixed(2)})`;
+      let varStr = i.variationsText ? ` [${i.variationsText}]` : '';
+      let txt = `• ${i.quantity}x ${i.name}${varStr} (R$ ${(Number(i.price) * i.quantity).toFixed(2)})`;
       if (i.note) txt += `\n   Obs: _"${i.note}"_`;
       return txt;
     }).join('\n\n');
@@ -165,13 +192,17 @@ export default function EcommerceCliente() {
     alert("Pedido de compra enviado para o WhatsApp!");
   };
 
+  // VERIFICA SE O PRODUTO SELECIONADO TEM VARIAÇÕES
+  const hasCustomVariations = selectedProduct?.variations_json && Array.isArray(selectedProduct.variations_json) && selectedProduct.variations_json.length > 0;
+  const isFashionFallback = !hasCustomVariations && (tenant?.niche === 'fashion' || !tenant?.niche);
+
   return (
     <div className="min-h-screen font-sans pb-24 max-w-md mx-auto transition-colors duration-300" style={{ backgroundColor: bgColor, color: textColor }}>
       {/* CAPA DA LOJA */}
       <div className="relative h-36 bg-gray-900 border-b border-white/10">
         <img src={tenant.banner_url || 'https://images.unsplash.com/photo-1441986300917-64674bd600d8?w=800&auto=format&fit=crop&q=80'} alt="Capa da Loja" className="w-full h-full object-cover opacity-50" />
         
-        {/* BOTÃO DO INSTAGRAM (SE HOUVER LINK CADASTRADO) */}
+        {/* BOTÃO DO INSTAGRAM */}
         {tenant.instagram_url && (
           <a
             href={tenant.instagram_url.startsWith('http') ? tenant.instagram_url : `https://${tenant.instagram_url}`}
@@ -249,7 +280,7 @@ export default function EcommerceCliente() {
             <div className="mt-2 pt-2 border-t border-white/10 flex justify-between items-center">
               <span className="font-bold text-xs" style={{ color: primaryColor }}>R$ {Number(p.price).toFixed(2)}</span>
               <button style={{ backgroundColor: primaryColor, color: btnTextColor }} className="px-2.5 py-1 rounded-lg text-xs font-bold transition shadow">
-                Ver Peça
+                Ver Produto
               </button>
             </div>
           </div>
@@ -270,7 +301,7 @@ export default function EcommerceCliente() {
         </div>
       )}
 
-      {/* MODAL DE DETALHES DO PRODUTO / ESCOLHA DE TAMANHO */}
+      {/* MODAL DE DETALHES DO PRODUTO / VARIAÇÕES DINÂMICAS */}
       {selectedProduct && (
         <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 p-4">
           <div style={{ backgroundColor: cardColor, color: textColor }} className="border border-white/10 w-full max-w-sm rounded-2xl p-5 space-y-4 shadow-2xl max-h-[90vh] overflow-y-auto">
@@ -286,31 +317,59 @@ export default function EcommerceCliente() {
               <p className="text-xs opacity-70">{selectedProduct.description}</p>
             </div>
 
-            {/* SELETOR DE TAMANHOS EM BOTÕES */}
-            <div className="space-y-2 pt-2 border-t border-white/10">
-              <label className="text-xs font-bold block opacity-80">🏷️ Selecione o Tamanho da Peça:</label>
-              <div className="grid grid-cols-5 gap-2">
-                {AVAILABLE_SIZES.map(size => {
-                  const isSelected = selectedSize === size;
-                  return (
-                    <button
-                      key={size}
-                      type="button"
-                      onClick={() => setSelectedSize(size)}
-                      style={{
-                        backgroundColor: isSelected ? primaryColor : bgColor,
-                        color: isSelected ? btnTextColor : textColor,
-                        borderColor: isSelected ? primaryColor : 'rgba(255,255,255,0.1)'
-                      }}
-                      className="py-2 rounded-xl text-xs font-bold border transition text-center">
-                      {size}
-                    </button>
-                  );
-                })}
+            {/* SELETOR DE VARIAÇÕES DINÂMICAS (JSON) */}
+            {hasCustomVariations && selectedProduct.variations_json.map((v, idx) => (
+              <div key={idx} className="space-y-2 pt-2 border-t border-white/10">
+                <label className="text-xs font-bold block opacity-80">🏷️ Selecione: {v.attribute_name}</label>
+                <div className="flex flex-wrap gap-2">
+                  {v.options.map((opt) => {
+                    const isSelected = selectedVariations[v.attribute_name] === opt;
+                    return (
+                      <button
+                        key={opt}
+                        type="button"
+                        onClick={() => handleSelectVariation(v.attribute_name, opt)}
+                        style={{
+                          backgroundColor: isSelected ? primaryColor : bgColor,
+                          color: isSelected ? btnTextColor : textColor,
+                          borderColor: isSelected ? primaryColor : 'rgba(255,255,255,0.1)'
+                        }}
+                        className="px-3 py-2 rounded-xl text-xs font-bold border transition text-center">
+                        {opt}
+                      </button>
+                    );
+                  })}
+                </div>
               </div>
-            </div>
+            ))}
 
-            {/* CAMPO DE OBSERVAÇÕES PARA OUTROS DETALHES */}
+            {/* SELETOR PADRÃO DE TAMANHOS (FALLBACK ROUPAS) */}
+            {isFashionFallback && (
+              <div className="space-y-2 pt-2 border-t border-white/10">
+                <label className="text-xs font-bold block opacity-80">🏷️ Selecione o Tamanho da Peça:</label>
+                <div className="grid grid-cols-5 gap-2">
+                  {DEFAULT_FASHION_SIZES.map(size => {
+                    const isSelected = selectedVariations['Tamanho'] === size;
+                    return (
+                      <button
+                        key={size}
+                        type="button"
+                        onClick={() => handleSelectVariation('Tamanho', size)}
+                        style={{
+                          backgroundColor: isSelected ? primaryColor : bgColor,
+                          color: isSelected ? btnTextColor : textColor,
+                          borderColor: isSelected ? primaryColor : 'rgba(255,255,255,0.1)'
+                        }}
+                        className="py-2 rounded-xl text-xs font-bold border transition text-center">
+                        {size}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+
+            {/* CAMPO DE OBSERVAÇÕES */}
             <div className="space-y-1 pt-1">
               <label className="text-xs font-bold block opacity-80">📝 Observação (Opcional):</label>
               <input
@@ -335,7 +394,7 @@ export default function EcommerceCliente() {
                 onClick={handleAddProductToCart}
                 style={{ backgroundColor: primaryColor, color: btnTextColor }}
                 className="flex-1 font-bold py-3 rounded-xl text-xs shadow-lg transition">
-                Adicionar ({selectedSize}) • R$ {(Number(selectedProduct.price) * productQuantity).toFixed(2)}
+                Adicionar • R$ {(Number(selectedProduct.price) * productQuantity).toFixed(2)}
               </button>
             </div>
           </div>
@@ -356,7 +415,9 @@ export default function EcommerceCliente() {
                 <div key={item.cartItemId} style={{ backgroundColor: bgColor }} className="p-2.5 rounded-xl border border-white/10 flex justify-between items-start text-xs space-x-2">
                   <div className="flex-1">
                     <span className="font-bold block">{item.quantity}x {item.name}</span>
-                    <span className="text-[10px] font-bold text-orange-400 block">Tamanho: {item.size}</span>
+                    {item.variationsText && (
+                      <span className="text-[10px] font-bold text-orange-400 block">{item.variationsText}</span>
+                    )}
                     {item.note && (
                       <p className="text-[10px] opacity-60 italic">Obs: "{item.note}"</p>
                     )}
