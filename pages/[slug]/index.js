@@ -26,7 +26,6 @@ export default function EcommerceCliente() {
   const [cart, setCart] = useState([]);
   const [showCartModal, setShowCartModal] = useState(false);
   const [deliveryType, setDeliveryType] = useState('ENTREGA'); // 'ENTREGA' ou 'RETIRADA'
-  const [shippingFee, setShippingFee] = useState(10.00);
   const [customerName, setCustomerName] = useState('');
   const [customerPhone, setCustomerPhone] = useState('');
   const [customerAddress, setCustomerAddress] = useState('');
@@ -43,7 +42,6 @@ export default function EcommerceCliente() {
     setLoading(true);
     const cleanSlug = String(slug).trim();
     
-    // Busca insensível a maiúsculas/minúsculas para evitar erro de slug
     const { data: tData, error: tErr } = await supabase
       .from('tenants')
       .select('*')
@@ -84,13 +82,11 @@ export default function EcommerceCliente() {
     setProductQuantity(1);
     setProductNote('');
 
-    // CARREGA A GALERIA DE FOTOS OU DEFINE A IMAGEM PADRÃO
     const gallery = product.images_json && Array.isArray(product.images_json) && product.images_json.length > 0 
       ? product.images_json 
       : [product.image];
     setActiveImage(gallery[0] || 'https://images.unsplash.com/photo-1523275335684-37898b6baf30?w=300&auto=format&fit=crop&q=80');
 
-    // INICIALIZA VARIAÇÕES DINÂMICAS OU FALLBACK DE ROUPAS
     const initialVars = {};
     if (product.variations_json && Array.isArray(product.variations_json) && product.variations_json.length > 0) {
       product.variations_json.forEach(v => {
@@ -155,8 +151,14 @@ export default function EcommerceCliente() {
   const cardColor = tenant.card_color || '#111827';
   const textColor = tenant.text_color || '#FFFFFF';
 
+  // REGRAS AUTOMÁTICAS DE FRETE
+  const defaultFee = Number(tenant.default_shipping_fee ?? 10.00);
+  const freeThreshold = Number(tenant.free_shipping_threshold ?? 0.00);
+  const allowPickup = tenant.enable_pickup ?? true;
+
   const subtotal = cart.reduce((sum, item) => sum + (Number(item.price) * item.quantity), 0);
-  const currentFee = deliveryType === 'ENTREGA' ? shippingFee : 0;
+  const isFreeShipping = freeThreshold > 0 && subtotal >= freeThreshold;
+  const currentFee = deliveryType === 'RETIRADA' ? 0 : (isFreeShipping ? 0 : defaultFee);
   const total = subtotal + currentFee;
 
   const filteredProducts = selectedCat === 'ALL' ? products : products.filter(p => String(p.category_id) === String(selectedCat));
@@ -172,13 +174,12 @@ export default function EcommerceCliente() {
 
     setIsSubmitting(true);
 
-    // 1. MONTA O PAYLOAD DO PEDIDO E SALVA NO SUPABASE
     const orderPayload = {
       tenant_id: tenant.id,
       customer_name: customerName,
       customer_phone: customerPhone,
       address: deliveryType === 'ENTREGA' ? customerAddress : 'Retirada na Loja',
-      neighborhood: deliveryType === 'ENTREGA' ? 'Entrega em Casa' : 'Retirar na Loja',
+      neighborhood: deliveryType === 'ENTREGA' ? (isFreeShipping ? 'Entrega em Casa (Frete Grátis)' : 'Entrega em Casa') : 'Retirar na Loja',
       items: cart.map(i => ({
         id: i.id,
         name: i.name,
@@ -211,7 +212,6 @@ export default function EcommerceCliente() {
       window.fbq('track', 'Purchase', { value: total, currency: 'BRL' });
     }
 
-    // 2. ENVIA A NOTIFICAÇÃO VIA WHATSAPP
     let orderTag = insertedOrder?.id ? ` #${insertedOrder.id}` : '';
     let itemsText = cart.map(i => {
       let varStr = i.variationsText ? ` [${i.variationsText}]` : '';
@@ -225,7 +225,7 @@ export default function EcommerceCliente() {
     msg += `*Tipo:* ${deliveryType === 'ENTREGA' ? `Entrega em: ${customerAddress}` : 'Retirar na Loja'}\n\n`;
     msg += `*ITENS COMPRADOS:*\n${itemsText}\n\n`;
     msg += `*Subtotal:* R$ ${subtotal.toFixed(2)}\n`;
-    msg += `*Frete/Envio:* R$ ${currentFee.toFixed(2)}\n`;
+    msg += `*Frete/Envio:* ${currentFee === 0 ? (deliveryType === 'RETIRADA' ? 'Grátis (Retirada)' : 'FRETE GRÁTIS 🎉') : `R$ ${currentFee.toFixed(2)}`}\n`;
     msg += `*TOTAL:* *R$ ${total.toFixed(2)}*\n`;
     msg += `*Forma de Pagamento:* ${paymentMethod}`;
 
@@ -355,7 +355,7 @@ export default function EcommerceCliente() {
         </div>
       )}
 
-      {/* MODAL DE DETALHES DO PRODUTO / GALERIA E VARIAÇÕES DINÂMICAS */}
+      {/* MODAL DE DETALHES DO PRODUTO */}
       {selectedProduct && (
         <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 p-4">
           <div style={{ backgroundColor: cardColor, color: textColor }} className="border border-white/10 w-full max-w-sm rounded-2xl p-5 space-y-4 shadow-2xl max-h-[90vh] overflow-y-auto">
@@ -475,6 +475,23 @@ export default function EcommerceCliente() {
               <button onClick={() => setShowCartModal(false)} className="opacity-60 font-bold text-xs">✕ Fechar</button>
             </div>
 
+            {/* BANNER DE PROGRESSO DO FRETE GRÁTIS */}
+            {freeThreshold > 0 && (
+              <div 
+                className="text-[11px] p-2.5 rounded-xl font-bold text-center border transition"
+                style={{ 
+                  backgroundColor: isFreeShipping ? 'rgba(34, 197, 94, 0.15)' : 'rgba(255, 255, 255, 0.05)',
+                  borderColor: isFreeShipping ? 'rgba(34, 197, 94, 0.4)' : 'rgba(255, 255, 255, 0.1)',
+                  color: isFreeShipping ? '#4ade80' : textColor
+                }}>
+                {isFreeShipping ? (
+                  <span>🎉 Parabéns! Você ganhou <b>FRETE GRÁTIS</b>!</span>
+                ) : (
+                  <span>Faltam <b>R$ {(freeThreshold - subtotal).toFixed(2)}</b> para você ganhar <b>FRETE GRÁTIS</b>!</span>
+                )}
+              </div>
+            )}
+
             <div className="space-y-2 max-h-48 overflow-y-auto">
               {cart.map(item => (
                 <div key={item.cartItemId} style={{ backgroundColor: bgColor }} className="p-2.5 rounded-xl border border-white/10 flex justify-between items-start text-xs space-x-2">
@@ -495,6 +512,7 @@ export default function EcommerceCliente() {
             </div>
 
             <form onSubmit={handleFinishOrder} className="space-y-3 pt-2 border-t border-white/10">
+              {/* OPÇÕES DE ENTREGA AUTOMÁTICAS */}
               <div className="flex space-x-2">
                 <button
                   type="button"
@@ -503,19 +521,22 @@ export default function EcommerceCliente() {
                     backgroundColor: deliveryType === 'ENTREGA' ? primaryColor : bgColor,
                     color: deliveryType === 'ENTREGA' ? btnTextColor : textColor
                   }}
-                  className="w-1/2 py-2 rounded-xl text-xs font-bold border border-white/10">
-                  🛵 Receber em Casa
+                  className={`py-2 rounded-xl text-xs font-bold border border-white/10 ${allowPickup ? 'w-1/2' : 'w-full'}`}>
+                  🛵 Entrega {isFreeShipping ? '(GRÁTIS)' : `(R$ ${defaultFee.toFixed(2)})`}
                 </button>
-                <button
-                  type="button"
-                  onClick={() => setDeliveryType('RETIRADA')}
-                  style={{ 
-                    backgroundColor: deliveryType === 'RETIRADA' ? primaryColor : bgColor,
-                    color: deliveryType === 'RETIRADA' ? btnTextColor : textColor
-                  }}
-                  className="w-1/2 py-2 rounded-xl text-xs font-bold border border-white/10">
-                  🏪 Retirar na Loja
-                </button>
+
+                {allowPickup && (
+                  <button
+                    type="button"
+                    onClick={() => setDeliveryType('RETIRADA')}
+                    style={{ 
+                      backgroundColor: deliveryType === 'RETIRADA' ? primaryColor : bgColor,
+                      color: deliveryType === 'RETIRADA' ? btnTextColor : textColor
+                    }}
+                    className="w-1/2 py-2 rounded-xl text-xs font-bold border border-white/10">
+                    🏪 Retirar na Loja
+                  </button>
+                )}
               </div>
 
               <div>
@@ -547,7 +568,14 @@ export default function EcommerceCliente() {
 
               <div style={{ backgroundColor: bgColor }} className="p-3 rounded-xl border border-white/10 space-y-1 text-xs">
                 <div className="flex justify-between"><span className="opacity-60">Subtotal:</span><span>R$ {subtotal.toFixed(2)}</span></div>
-                <div className="flex justify-between"><span className="opacity-60">Taxa de Frete/Envio:</span><span>R$ {currentFee.toFixed(2)}</span></div>
+                <div className="flex justify-between">
+                  <span className="opacity-60">Taxa de Frete/Envio:</span>
+                  <span>
+                    {deliveryType === 'RETIRADA' 
+                      ? 'Grátis' 
+                      : (isFreeShipping ? '🎉 FRETE GRÁTIS' : `R$ ${currentFee.toFixed(2)}`)}
+                  </span>
+                </div>
                 <div className="flex justify-between font-bold text-sm pt-1 border-t border-white/10"><span style={{ color: primaryColor }}>TOTAL:</span><span style={{ color: primaryColor }}>R$ {total.toFixed(2)}</span></div>
               </div>
 
