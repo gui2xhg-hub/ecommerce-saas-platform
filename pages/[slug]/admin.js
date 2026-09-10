@@ -20,8 +20,10 @@ export default function AdminTenant() {
   const [allOrders, setAllOrders] = useState([]);
   const [reportFilter, setReportFilter] = useState('all');
 
-  // CONFIGURAÇÕES AUTOMÁTICAS DE FRETE E CEP DE ORIGEM
+  // CONFIGURAÇÕES AUTOMÁTICAS E MODOS DE FRETE
+  const [shippingMode, setShippingMode] = useState('local'); // 'local', 'national', 'hybrid'
   const [originCep, setOriginCep] = useState('');
+  const [melhorenvioToken, setMelhorenvioToken] = useState('');
   const [defaultShippingFee, setDefaultShippingFee] = useState(10.00);
   const [freeShippingThreshold, setFreeShippingThreshold] = useState(0.00);
   const [enablePickup, setEnablePickup] = useState(true);
@@ -35,7 +37,11 @@ export default function AdminTenant() {
     description: '', 
     image: '',
     images_json: [],
-    variations_json: []
+    variations_json: [],
+    weight_kg: '0.3',
+    width_cm: '15',
+    height_cm: '10',
+    length_cm: '20'
   });
   const [editingProduct, setEditingProduct] = useState(null);
   const [editingCategory, setEditingCategory] = useState(null);
@@ -63,7 +69,9 @@ export default function AdminTenant() {
     const { data: tData } = await supabase.from('tenants').select('*').eq('slug', slug).single();
     if (tData) {
       setTenant(tData);
+      setShippingMode(tData.shipping_mode || 'local');
       setOriginCep(tData.origin_cep || '');
+      setMelhorenvioToken(tData.melhorenvio_token || '');
       setDefaultShippingFee(tData.default_shipping_fee ?? 10.00);
       setFreeShippingThreshold(tData.free_shipping_threshold ?? 0.00);
       setEnablePickup(tData.enable_pickup ?? true);
@@ -98,7 +106,9 @@ export default function AdminTenant() {
 
     if (tData) {
       setTenant(tData);
+      setShippingMode(tData.shipping_mode || 'local');
       setOriginCep(tData.origin_cep || '');
+      setMelhorenvioToken(tData.melhorenvio_token || '');
       setDefaultShippingFee(tData.default_shipping_fee ?? 10.00);
       setFreeShippingThreshold(tData.free_shipping_threshold ?? 0.00);
       setEnablePickup(tData.enable_pickup ?? true);
@@ -127,7 +137,9 @@ export default function AdminTenant() {
       secondary_color: tenant.secondary_color || '#090D16',
       admin_password: tenant.admin_password || '',
       niche: tenant.niche || 'general',
+      shipping_mode: shippingMode,
       origin_cep: originCep,
+      melhorenvio_token: melhorenvioToken,
       default_shipping_fee: Number(defaultShippingFee),
       free_shipping_threshold: Number(freeShippingThreshold),
       enable_pickup: enablePickup
@@ -268,6 +280,10 @@ export default function AdminTenant() {
       image: mainImage,
       images_json: newProd.images_json || [mainImage],
       variations_json: newProd.variations_json || [],
+      weight_kg: parseFloat(String(newProd.weight_kg || '0.3').replace(',', '.')),
+      width_cm: parseFloat(String(newProd.width_cm || '15').replace(',', '.')),
+      height_cm: parseFloat(String(newProd.height_cm || '10').replace(',', '.')),
+      length_cm: parseFloat(String(newProd.length_cm || '20').replace(',', '.')),
       active: true
     }]);
 
@@ -283,7 +299,11 @@ export default function AdminTenant() {
         description: '', 
         image: '', 
         images_json: [],
-        variations_json: [] 
+        variations_json: [],
+        weight_kg: '0.3',
+        width_cm: '15',
+        height_cm: '10',
+        length_cm: '20'
       });
       fetchData();
     }
@@ -303,7 +323,11 @@ export default function AdminTenant() {
       category_id: parseInt(editingProduct.category_id),
       image: mainImage,
       images_json: editingProduct.images_json || [mainImage],
-      variations_json: editingProduct.variations_json || []
+      variations_json: editingProduct.variations_json || [],
+      weight_kg: parseFloat(String(editingProduct.weight_kg || '0.3').replace(',', '.')),
+      width_cm: parseFloat(String(editingProduct.width_cm || '15').replace(',', '.')),
+      height_cm: parseFloat(String(editingProduct.height_cm || '10').replace(',', '.')),
+      length_cm: parseFloat(String(editingProduct.length_cm || '20').replace(',', '.'))
     }).eq('id', editingProduct.id);
 
     if (error) {
@@ -521,6 +545,29 @@ export default function AdminTenant() {
                 </div>
               </div>
 
+              {/* PESO E DIMENSÕES PARA FRETE NACIONAL */}
+              <div className="bg-gray-950 p-3.5 rounded-2xl border border-gray-800 space-y-2">
+                <label className="text-xs font-bold text-orange-400 block">📦 Peso e Dimensões da Caixa/Embalagem (Para Frete Nacional por CEP)</label>
+                <div className="grid grid-cols-4 gap-2 text-xs">
+                  <div>
+                    <label className="text-[10px] text-gray-400 block mb-1">Peso (kg):</label>
+                    <input type="text" placeholder="0.3" value={newProd.weight_kg} onChange={(e) => setNewProd({ ...newProd, weight_kg: e.target.value })} className="w-full bg-gray-900 border border-gray-800 p-2 rounded-xl text-xs text-white focus:outline-none" />
+                  </div>
+                  <div>
+                    <label className="text-[10px] text-gray-400 block mb-1">Largura (cm):</label>
+                    <input type="text" placeholder="15" value={newProd.width_cm} onChange={(e) => setNewProd({ ...newProd, width_cm: e.target.value })} className="w-full bg-gray-900 border border-gray-800 p-2 rounded-xl text-xs text-white focus:outline-none" />
+                  </div>
+                  <div>
+                    <label className="text-[10px] text-gray-400 block mb-1">Altura (cm):</label>
+                    <input type="text" placeholder="10" value={newProd.height_cm} onChange={(e) => setNewProd({ ...newProd, height_cm: e.target.value })} className="w-full bg-gray-900 border border-gray-800 p-2 rounded-xl text-xs text-white focus:outline-none" />
+                  </div>
+                  <div>
+                    <label className="text-[10px] text-gray-400 block mb-1">Compr. (cm):</label>
+                    <input type="text" placeholder="20" value={newProd.length_cm} onChange={(e) => setNewProd({ ...newProd, length_cm: e.target.value })} className="w-full bg-gray-900 border border-gray-800 p-2 rounded-xl text-xs text-white focus:outline-none" />
+                  </div>
+                </div>
+              </div>
+
               <div className="bg-gray-950 p-3.5 rounded-2xl border border-gray-800 space-y-3">
                 <label className="text-xs font-bold text-blue-400 block">🖼️ Galeria de Fotos do Produto</label>
                 <div className="flex space-x-2">
@@ -688,64 +735,102 @@ export default function AdminTenant() {
         </div>
       )}
 
-      {/* FRETE & CEP DE ORIGEM (SESSÃO ÚNICA DE FRETE) */}
+      {/* FRETE & CEP DE ORIGEM (SESSÃO ÚNICA DE FRETE COM MODOS DE OPERAÇÃO) */}
       {activeTab === 'neighborhoods' && (
         <div className="space-y-6">
           <section className="bg-gray-900 p-5 rounded-3xl border border-orange-500/30 space-y-4 shadow-xl">
             <h3 className="font-bold text-sm text-orange-400 flex items-center space-x-2">
-              <span>🛵 Configurações Gerais de Frete & Cálculo por CEP</span>
+              <span>🚚 Configuração do Modo de Envio do E-commerce</span>
             </h3>
 
-            <div className="space-y-3">
+            <div className="space-y-4">
               <div>
-                <label className="text-xs text-gray-400 block mb-1">CEP de Origem da Loja (Para cálculo Correios / PAC / SEDEX):</label>
-                <input
-                  type="text"
-                  placeholder="Ex: 88301-000"
-                  value={originCep}
-                  onChange={(e) => setOriginCep(e.target.value)}
-                  className="w-full bg-gray-950 border border-gray-800 p-3 rounded-xl text-xs text-white focus:outline-none font-mono"
-                />
-                <span className="text-[10px] text-gray-500 block mt-1">CEP do local de onde os produtos serão despachados.</span>
+                <label className="text-xs font-bold text-blue-400 block mb-1">🎯 Como sua loja realiza as entregas?</label>
+                <select
+                  value={shippingMode}
+                  onChange={(e) => setShippingMode(e.target.value)}
+                  className="w-full bg-gray-950 border border-gray-800 p-3 rounded-xl text-xs text-white focus:outline-none font-bold">
+                  <option value="local">🛵 Apenas Local (Taxa Fixa / Bairros / Retirada no Balcão)</option>
+                  <option value="national">📦 Apenas Nacional (Cálculo via CEP / Correios / Transportadoras)</option>
+                  <option value="hybrid">⚡ Híbrido (Motoboy para Cidade Local + Correios para o Brasil)</option>
+                </select>
+                <p className="text-[10px] text-gray-400 mt-1">
+                  {shippingMode === 'local' && 'Ideal para negócios locais (lojas de bairro, restaurantes, padarias).'}
+                  {shippingMode === 'national' && 'Ideal para marcas de alcance nacional (perfumes, eletrônicos, cosméticos).'}
+                  {shippingMode === 'hybrid' && 'Combina entrega rápida por motoboy na sua cidade com envio via Correios para o Brasil todo.'}
+                </p>
               </div>
 
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-                <div>
-                  <label className="text-xs text-gray-400 block mb-1">Taxa Padrão / Fixa de Entrega (R$):</label>
-                  <input
-                    type="number"
-                    step="0.01"
-                    value={defaultShippingFee}
-                    onChange={(e) => setDefaultShippingFee(e.target.value)}
-                    className="w-full bg-gray-950 border border-gray-800 p-2.5 rounded-xl text-xs text-white focus:outline-none"
-                    placeholder="10.00"
-                  />
-                </div>
+              {(shippingMode === 'national' || shippingMode === 'hybrid') && (
+                <div className="space-y-3 bg-gray-950 p-3.5 rounded-2xl border border-gray-800">
+                  <h4 className="font-bold text-xs text-orange-400">📦 Parâmetros para Frete Nacional por CEP</h4>
+                  <div>
+                    <label className="text-xs text-gray-400 block mb-1">CEP de Origem (Endereço do Estoque):</label>
+                    <input
+                      type="text"
+                      placeholder="Ex: 88301-000"
+                      value={originCep}
+                      onChange={(e) => setOriginCep(e.target.value)}
+                      className="w-full bg-gray-900 border border-gray-800 p-2.5 rounded-xl text-xs text-white focus:outline-none font-mono"
+                    />
+                  </div>
 
-                <div>
-                  <label className="text-xs text-gray-400 block mb-1">Valor p/ Frete Grátis (R$):</label>
-                  <input
-                    type="number"
-                    step="0.01"
-                    value={freeShippingThreshold}
-                    onChange={(e) => setFreeShippingThreshold(e.target.value)}
-                    className="w-full bg-gray-950 border border-gray-800 p-2.5 rounded-xl text-xs text-white focus:outline-none"
-                    placeholder="0.00"
-                  />
-                  <span className="text-[9px] text-gray-500 block mt-0.5">(0 = sem regra de frete grátis)</span>
+                  <div>
+                    <label className="text-xs text-gray-400 block mb-1">Token de Acesso do Melhor Envio (Opcional):</label>
+                    <input
+                      type="password"
+                      placeholder="Token para cotação direta na conta do lojista"
+                      value={melhorenvioToken}
+                      onChange={(e) => setMelhorenvioToken(e.target.value)}
+                      className="w-full bg-gray-900 border border-gray-800 p-2.5 rounded-xl text-xs text-white focus:outline-none font-mono"
+                    />
+                    <span className="text-[9px] text-gray-500 block mt-0.5">Se deixado em branco, a plataforma utilizará a integração padrão.</span>
+                  </div>
                 </div>
+              )}
 
-                <div>
-                  <label className="text-xs text-gray-400 block mb-1">Permitir Retirada?</label>
-                  <select
-                    value={enablePickup ? 'SIM' : 'NAO'}
-                    onChange={(e) => setEnablePickup(e.target.value === 'SIM')}
-                    className="w-full bg-gray-950 border border-gray-800 p-2.5 rounded-xl text-xs text-white focus:outline-none">
-                    <option value="SIM">Sim (Cliente pode retirar)</option>
-                    <option value="NAO">Não (Apenas Entrega)</option>
-                  </select>
+              {(shippingMode === 'local' || shippingMode === 'hybrid') && (
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-3 bg-gray-950 p-3.5 rounded-2xl border border-gray-800">
+                  <div className="col-span-full">
+                    <h4 className="font-bold text-xs text-blue-400">🛵 Parâmetros para Entregas Locais</h4>
+                  </div>
+                  <div>
+                    <label className="text-xs text-gray-400 block mb-1">Taxa Fixa Local (R$):</label>
+                    <input
+                      type="number"
+                      step="0.01"
+                      value={defaultShippingFee}
+                      onChange={(e) => setDefaultShippingFee(e.target.value)}
+                      className="w-full bg-gray-900 border border-gray-800 p-2.5 rounded-xl text-xs text-white focus:outline-none"
+                      placeholder="10.00"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="text-xs text-gray-400 block mb-1">Valor p/ Frete Grátis (R$):</label>
+                    <input
+                      type="number"
+                      step="0.01"
+                      value={freeShippingThreshold}
+                      onChange={(e) => setFreeShippingThreshold(e.target.value)}
+                      className="w-full bg-gray-900 border border-gray-800 p-2.5 rounded-xl text-xs text-white focus:outline-none"
+                      placeholder="0.00"
+                    />
+                    <span className="text-[9px] text-gray-500 block mt-0.5">(0 = sem frete grátis)</span>
+                  </div>
+
+                  <div>
+                    <label className="text-xs text-gray-400 block mb-1">Permitir Retirada?</label>
+                    <select
+                      value={enablePickup ? 'SIM' : 'NAO'}
+                      onChange={(e) => setEnablePickup(e.target.value === 'SIM')}
+                      className="w-full bg-gray-900 border border-gray-800 p-2.5 rounded-xl text-xs text-white focus:outline-none">
+                      <option value="SIM">Sim (Cliente pode retirar)</option>
+                      <option value="NAO">Não (Apenas Entrega)</option>
+                    </select>
+                  </div>
                 </div>
-              </div>
+              )}
 
               <button
                 type="button"
@@ -756,29 +841,33 @@ export default function AdminTenant() {
             </div>
           </section>
 
-          <section className="bg-gray-900 p-5 rounded-3xl border border-gray-800 space-y-4 shadow-xl">
-            <h3 className="font-bold text-sm text-blue-400">🚚 Opções Complementares de Frete / Envio por Bairro ou Região (Manual)</h3>
-            <form onSubmit={handleAddNeighborhood} className="space-y-3">
-              <input type="text" placeholder="Nome (Ex: Motoboy Centro, SEDEX SP, PAC Brasil)" value={newNeigh.name} className="w-full bg-gray-950 border border-gray-800 p-3 rounded-xl text-xs text-white focus:outline-none" onChange={(e) => setNewNeigh({ ...newNeigh, name: e.target.value })} />
-              <input type="text" placeholder="Taxa de Envio R$ Ex: 20.00" value={newNeigh.fee} className="w-full bg-gray-950 border border-gray-800 p-3 rounded-xl text-xs text-white focus:outline-none" onChange={(e) => setNewNeigh({ ...newNeigh, fee: e.target.value })} />
-              <button type="submit" className="w-full bg-green-600 hover:bg-green-700 font-bold py-3 rounded-xl text-xs text-white transition">Cadastrar Opção Manual de Frete</button>
-            </form>
-          </section>
+          {(shippingMode === 'local' || shippingMode === 'hybrid') && (
+            <>
+              <section className="bg-gray-900 p-5 rounded-3xl border border-gray-800 space-y-4 shadow-xl">
+                <h3 className="font-bold text-sm text-blue-400">🛵 Cadastrar Bairros ou Regiões Locais (Manual)</h3>
+                <form onSubmit={handleAddNeighborhood} className="space-y-3">
+                  <input type="text" placeholder="Nome (Ex: Centro, Bairro São João, Zona Norte)" value={newNeigh.name} className="w-full bg-gray-950 border border-gray-800 p-3 rounded-xl text-xs text-white focus:outline-none" onChange={(e) => setNewNeigh({ ...newNeigh, name: e.target.value })} />
+                  <input type="text" placeholder="Taxa de Envio R$ Ex: 15.00" value={newNeigh.fee} className="w-full bg-gray-950 border border-gray-800 p-3 rounded-xl text-xs text-white focus:outline-none" onChange={(e) => setNewNeigh({ ...newNeigh, fee: e.target.value })} />
+                  <button type="submit" className="w-full bg-green-600 hover:bg-green-700 font-bold py-3 rounded-xl text-xs text-white transition">Cadastrar Bairro / Região</button>
+                </form>
+              </section>
 
-          <section className="space-y-2">
-            {neighborhoods.map((n) => (
-              <div key={n.id} className="bg-gray-900 p-3.5 rounded-2xl border border-gray-800 flex justify-between items-center text-xs">
-                <div>
-                  <span className="font-bold block text-white">{n.name}</span>
-                  <span className="text-blue-400 font-bold">Taxa: R$ {Number(n.fee).toFixed(2)}</span>
-                </div>
-                <div className="flex space-x-1.5">
-                  <button onClick={() => setEditingNeigh(n)} className="text-xs bg-blue-600/20 text-blue-400 px-3 py-1.5 rounded-xl font-bold border border-blue-500/30">✏️ Editar</button>
-                  <button onClick={async () => { if (confirm("Excluir opção de frete?")) { await supabase.from('neighborhoods').delete().eq('id', n.id); fetchData(); } }} className="text-red-400 font-bold p-1">🗑</button>
-                </div>
-              </div>
-            ))}
-          </section>
+              <section className="space-y-2">
+                {neighborhoods.map((n) => (
+                  <div key={n.id} className="bg-gray-900 p-3.5 rounded-2xl border border-gray-800 flex justify-between items-center text-xs">
+                    <div>
+                      <span className="font-bold block text-white">{n.name}</span>
+                      <span className="text-blue-400 font-bold">Taxa: R$ {Number(n.fee).toFixed(2)}</span>
+                    </div>
+                    <div className="flex space-x-1.5">
+                      <button onClick={() => setEditingNeigh(n)} className="text-xs bg-blue-600/20 text-blue-400 px-3 py-1.5 rounded-xl font-bold border border-blue-500/30">✏️ Editar</button>
+                      <button onClick={async () => { if (confirm("Excluir opção de frete?")) { await supabase.from('neighborhoods').delete().eq('id', n.id); fetchData(); } }} className="text-red-400 font-bold p-1">🗑</button>
+                    </div>
+                  </div>
+                ))}
+              </section>
+            </>
+          )}
         </div>
       )}
 
@@ -873,7 +962,6 @@ export default function AdminTenant() {
                 <input type="text" value={tenant.name || ''} className="w-full bg-gray-950 border border-gray-800 p-3 rounded-xl text-xs text-white focus:outline-none" onChange={(e) => setTenant({ ...tenant, name: e.target.value })} />
               </div>
 
-              {/* NICHO DA LOJA */}
               <div>
                 <label className="text-[11px] text-blue-400 font-bold block mb-1">🎯 Segmento / Nicho do E-commerce:</label>
                 <select
@@ -1052,6 +1140,28 @@ export default function AdminTenant() {
             <select value={editingProduct.category_id} onChange={(e) => setEditingProduct({ ...editingProduct, category_id: e.target.value })} className="w-full bg-gray-950 border border-gray-800 p-3 rounded-xl text-xs text-white focus:outline-none">
               {categories.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
             </select>
+
+            <div className="bg-gray-950 p-3.5 rounded-2xl border border-gray-800 space-y-2">
+              <label className="text-xs font-bold text-orange-400 block">📦 Peso e Dimensões (Para Frete Nacional)</label>
+              <div className="grid grid-cols-4 gap-2 text-xs">
+                <div>
+                  <label className="text-[10px] text-gray-400 block mb-1">Peso (kg):</label>
+                  <input type="text" value={editingProduct.weight_kg ?? '0.3'} onChange={(e) => setEditingProduct({ ...editingProduct, weight_kg: e.target.value })} className="w-full bg-gray-900 border border-gray-800 p-2 rounded-xl text-xs text-white focus:outline-none" />
+                </div>
+                <div>
+                  <label className="text-[10px] text-gray-400 block mb-1">Largura (cm):</label>
+                  <input type="text" value={editingProduct.width_cm ?? '15'} onChange={(e) => setEditingProduct({ ...editingProduct, width_cm: e.target.value })} className="w-full bg-gray-900 border border-gray-800 p-2 rounded-xl text-xs text-white focus:outline-none" />
+                </div>
+                <div>
+                  <label className="text-[10px] text-gray-400 block mb-1">Altura (cm):</label>
+                  <input type="text" value={editingProduct.height_cm ?? '10'} onChange={(e) => setEditingProduct({ ...editingProduct, height_cm: e.target.value })} className="w-full bg-gray-900 border border-gray-800 p-2 rounded-xl text-xs text-white focus:outline-none" />
+                </div>
+                <div>
+                  <label className="text-[10px] text-gray-400 block mb-1">Compr. (cm):</label>
+                  <input type="text" value={editingProduct.length_cm ?? '20'} onChange={(e) => setEditingProduct({ ...editingProduct, length_cm: e.target.value })} className="w-full bg-gray-900 border border-gray-800 p-2 rounded-xl text-xs text-white focus:outline-none" />
+                </div>
+              </div>
+            </div>
 
             <div className="bg-gray-950 p-3.5 rounded-2xl border border-gray-800 space-y-3">
               <label className="text-xs font-bold text-blue-400 block">🖼️ Galeria de Fotos do Produto</label>
