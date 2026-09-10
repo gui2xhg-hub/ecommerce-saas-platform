@@ -34,6 +34,13 @@ export default function EcommerceCliente() {
   const [paymentMethod, setPaymentMethod] = useState('PIX');
   const [isSubmitting, setIsSubmitting] = useState(false);
 
+  // CÁLCULO DE FRETE POR CEP (NACIONAL / HÍBRIDO)
+  const [destinationCep, setDestinationCep] = useState('');
+  const [isCalculatingCep, setIsCalculatingCep] = useState(false);
+  const [calculatedOptions, setCalculatedOptions] = useState([]);
+  const [selectedShippingOption, setSelectedShippingOption] = useState(null);
+  const [cepError, setCepError] = useState('');
+
   // CUPOM DE DESCONTO
   const [couponInput, setCouponInput] = useState('');
   const [appliedCoupon, setAppliedCoupon] = useState(null);
@@ -150,6 +157,66 @@ export default function EcommerceCliente() {
     setCart(cart.filter(item => item.cartItemId !== cartItemId));
   };
 
+  const handleCalculateCep = async (cepToCalc) => {
+    const cleanCep = (cepToCalc || destinationCep).replace(/\D/g, '');
+    if (cleanCep.length !== 8) {
+      setCepError('Digite um CEP válido com 8 números.');
+      return;
+    }
+
+    setIsCalculatingCep(true);
+    setCepError('');
+
+    try {
+      const res = await fetch(`https://viacep.com.br/ws/${cleanCep}/json/`);
+      const data = await res.json();
+
+      if (data.erro) {
+        setCepError('CEP não encontrado. Verifique o número digitado.');
+        setIsCalculatingCep(false);
+        return;
+      }
+
+      if (data.logradouro && !customerAddress) {
+        setCustomerAddress(`${data.logradouro}, nº , ${data.bairro} - ${data.localidade}/${data.uf}`);
+      }
+
+      // Cálculo de Peso Total do Carrinho
+      const totalWeight = cart.reduce((acc, item) => {
+        const prod = products.find(p => p.id === item.id);
+        return acc + ((prod?.weight_kg || 0.3) * item.quantity);
+      }, 0);
+
+      const isFree = freeThreshold > 0 && subtotal >= freeThreshold;
+      const options = [];
+
+      // Cálculo PAC e SEDEX para Envio Nacional / Híbrido
+      const basePacFee = Math.max(16.50, 16.50 + (totalWeight - 0.5) * 4.5);
+      const baseSedexFee = Math.max(28.90, 28.90 + (totalWeight - 0.5) * 8.0);
+
+      options.push({
+        id: 'pac',
+        name: '📦 Correios PAC',
+        fee: isFree ? 0 : basePacFee,
+        time: '4 a 8 dias úteis'
+      });
+
+      options.push({
+        id: 'sedex',
+        name: '⚡ Correios SEDEX',
+        fee: isFree ? 0 : baseSedexFee,
+        time: '1 a 3 dias úteis'
+      });
+
+      setCalculatedOptions(options);
+      setSelectedShippingOption(options[0]);
+    } catch (err) {
+      setCepError('Erro ao consultar o CEP. Tente novamente.');
+    } finally {
+      setIsCalculatingCep(false);
+    }
+  };
+
   const handleApplyCoupon = async (e) => {
     e.preventDefault();
     if (!couponInput.trim()) return;
@@ -181,17 +248,32 @@ export default function EcommerceCliente() {
   const cardColor = tenant.card_color || '#111827';
   const textColor = tenant.text_color || '#FFFFFF';
 
-  // REGRAS AUTOMÁTICAS DE FRETE
+  const shippingMode = tenant.shipping_mode || 'local'; // 'local', 'national', 'hybrid'
   const defaultFee = Number(tenant.default_shipping_fee ?? 10.00);
   const freeThreshold = Number(tenant.free_shipping_threshold ?? 0.00);
   const allowPickup = tenant.enable_pickup ?? true;
 
   const selectedNeighborhood = neighborhoods.find(n => String(n.id) === String(selectedNeighId));
-  const activeShippingFee = selectedNeighborhood ? Number(selectedNeighborhood.fee) : defaultFee;
+  const localShippingFee = selectedNeighborhood ? Number(selectedNeighborhood.fee) : defaultFee;
 
   const subtotal = cart.reduce((sum, item) => sum + (Number(item.price) * item.quantity), 0);
   const isFreeShipping = freeThreshold > 0 && subtotal >= freeThreshold;
-  const currentFee = deliveryType === 'RETIRADA' ? 0 : (isFreeShipping ? 0 : activeShippingFee);
+
+  // CÁLCULO DA TAXA DE FRETE ATIVA
+  let activeShippingFee = 0;
+  if (deliveryType === 'RETIRADA') {
+    activeShippingFee = 0;
+  } else if (shippingMode === 'local') {
+    activeShippingFee = isFreeShipping ? 0 : localShippingFee;
+  } else if (shippingMode === 'national') {
+    activeShippingFee = isFreeShipping ? 0 : (selectedShippingOption ? selectedShippingOption.fee : 0);
+  } else if (shippingMode === 'hybrid') {
+    if (selectedShippingOption) {
+      activeShippingFee = isFreeShipping ? 0 : selectedShippingOption.fee;
+    } else {
+      activeShippingFee = isFreeShipping ? 0 : localShippingFee;
+    }
+  }
 
   // CÁLCULO DE DESCONTO DO CUPOM
   let discountValue = 0;
@@ -204,9 +286,9 @@ export default function EcommerceCliente() {
     if (discountValue > subtotal) discountValue = subtotal;
   }
 
-  const total = Math.max(0, subtotal - discountValue + currentFee);
+  const total = Math.max(0, subtotal - discountValue + activeShippingFee);
 
-  // FILTRAGEM COM SUPORTE PARA A ABA 'OFFERS' (🔥 PROMOÇÕES)
+  // FILTRAGEM DE PRODUTOS
   const promoProductsCount = products.filter(p => p.original_price && Number(p.original_price) > Number(p.price)).length;
   
   const filteredProducts = selectedCat === 'ALL' 
@@ -227,16 +309,24 @@ export default function EcommerceCliente() {
 
     setIsSubmitting(true);
 
-    const neighborhoodLabel = deliveryType === 'ENTREGA' 
-      ? (selectedNeighborhood ? selectedNeighborhood.name : (isFreeShipping ? 'Entrega em Casa (Frete Grátis)' : 'Entrega em Casa'))
-      : 'Retirar na Loja';
+    let shippingLabel = 'Retirar na Loja';
+    if (deliveryType === 'ENTREGA') {
+      if (shippingMode === 'local') {
+        shippingLabel = selectedNeighborhood ? selectedNeighborhood.name : 'Entrega Local';
+      } else if (selectedShippingOption) {
+        shippingLabel = `${selectedShippingOption.name} (${selectedShippingOption.time})`;
+      } else {
+        shippingLabel = 'Entrega Padrão';
+      }
+      if (isFreeShipping) shippingLabel += ' [Frete Grátis]';
+    }
 
     const orderPayload = {
       tenant_id: tenant.id,
       customer_name: customerName,
       customer_phone: customerPhone,
       address: deliveryType === 'ENTREGA' ? customerAddress : 'Retirada na Loja',
-      neighborhood: neighborhoodLabel,
+      neighborhood: shippingLabel,
       items: cart.map(i => ({
         id: i.id,
         name: i.name,
@@ -247,7 +337,7 @@ export default function EcommerceCliente() {
         note: i.note || ''
       })),
       subtotal: Number(subtotal.toFixed(2)),
-      delivery_fee: Number(currentFee.toFixed(2)),
+      delivery_fee: Number(activeShippingFee.toFixed(2)),
       total: Number(total.toFixed(2)),
       payment_method: paymentMethod,
       status: 'recebido'
@@ -279,13 +369,14 @@ export default function EcommerceCliente() {
 
     let msg = `*NOVA COMPRA NA LOJA${orderTag} - ${tenant.name.toUpperCase()}*\n\n`;
     msg += `*Cliente:* ${customerName}\n*Telefone:* ${customerPhone}\n`;
-    msg += `*Tipo:* ${deliveryType === 'ENTREGA' ? `Entrega em: ${customerAddress} (${neighborhoodLabel})` : 'Retirar na Loja'}\n\n`;
-    msg += `*ITENS COMPRADOS:*\n${itemsText}\n\n`;
+    msg += `*Tipo de Envio:* ${deliveryType === 'ENTREGA' ? `Entrega em: ${customerAddress} (${shippingLabel})` : 'Retirar na Loja'}\n`;
+    if (destinationCep) msg += `*CEP:* ${destinationCep}\n`;
+    msg += `\n*ITENS COMPRADOS:*\n${itemsText}\n\n`;
     msg += `*Subtotal:* R$ ${subtotal.toFixed(2)}\n`;
     if (discountValue > 0) {
-      msg += `*Desconto (${appliedCoupon.code}):* -R$ ${discountValue.toFixed(2)}\n`;
+      msg += `*Desconto (${appliedCoupon?.code}):* -R$ ${discountValue.toFixed(2)}\n`;
     }
-    msg += `*Frete/Envio:* ${currentFee === 0 ? (deliveryType === 'RETIRADA' ? 'Grátis (Retirada)' : 'FRETE GRÁTIS 🎉') : `R$ ${currentFee.toFixed(2)}`}\n`;
+    msg += `*Frete/Envio:* ${activeShippingFee === 0 ? (deliveryType === 'RETIRADA' ? 'Grátis (Retirada)' : 'FRETE GRÁTIS 🎉') : `R$ ${activeShippingFee.toFixed(2)}`}\n`;
     msg += `*TOTAL:* *R$ ${total.toFixed(2)}*\n`;
     msg += `*Forma de Pagamento:* ${paymentMethod}`;
 
@@ -363,7 +454,6 @@ export default function EcommerceCliente() {
             Todos
           </button>
 
-          {/* BOTÃO ESPECIAL DE PROMOÇÕES */}
           {promoProductsCount > 0 && (
             <button
               onClick={() => setSelectedCat('OFFERS')}
@@ -407,7 +497,6 @@ export default function EcommerceCliente() {
               style={{ backgroundColor: cardColor }} 
               className="p-3 rounded-2xl border border-white/10 flex flex-col justify-between cursor-pointer hover:border-white/20 transition relative group">
               
-              {/* BADGE DE PROMOÇÃO NO CARD */}
               {hasPromo && (
                 <div className="absolute top-2.5 right-2.5 z-10 bg-gradient-to-r from-red-600 to-orange-500 text-white font-extrabold text-[9px] px-2 py-0.5 rounded-full shadow-lg border border-white/20 uppercase tracking-wider animate-pulse">
                   -{discPercent}% OFF
@@ -671,7 +760,7 @@ export default function EcommerceCliente() {
                     color: deliveryType === 'ENTREGA' ? btnTextColor : textColor
                   }}
                   className={`py-2 rounded-xl text-xs font-bold border border-white/10 ${allowPickup ? 'w-1/2' : 'w-full'}`}>
-                  🛵 Entrega {isFreeShipping ? '(GRÁTIS)' : `(R$ ${activeShippingFee.toFixed(2)})`}
+                  🛵 Entrega {isFreeShipping ? '(GRÁTIS)' : ''}
                 </button>
 
                 {allowPickup && (
@@ -688,21 +777,86 @@ export default function EcommerceCliente() {
                 )}
               </div>
 
-              {/* OPÇÕES DE FRETE / BAIRRO DO ADMIN */}
-              {deliveryType === 'ENTREGA' && neighborhoods.length > 0 && (
-                <div>
-                  <label className="text-[11px] opacity-70 block mb-1">Selecione a Região / Bairro de Entrega:</label>
-                  <select
-                    value={selectedNeighId}
-                    onChange={(e) => setSelectedNeighId(e.target.value)}
-                    style={{ backgroundColor: bgColor, color: textColor }}
-                    className="w-full border border-white/10 p-2.5 rounded-xl text-xs focus:outline-none">
-                    <option value="">Taxa Padrão de Entrega (R$ {defaultFee.toFixed(2)})</option>
-                    {neighborhoods.map(n => (
-                      <option key={n.id} value={n.id}>{n.name} — R$ {Number(n.fee).toFixed(2)}</option>
-                    ))}
-                  </select>
-                </div>
+              {/* CÁLCULO DE FRETE SEGUNDO O MODO DA LOJA */}
+              {deliveryType === 'ENTREGA' && (
+                <>
+                  {(shippingMode === 'national' || shippingMode === 'hybrid') && (
+                    <div className="space-y-2 p-3 rounded-xl border border-white/10 bg-black/20">
+                      <label className="text-[11px] font-bold block text-orange-400">📦 Digite seu CEP para calcular o Frete:</label>
+                      <div className="flex space-x-2">
+                        <input
+                          type="text"
+                          placeholder="Ex: 01001-000"
+                          value={destinationCep}
+                          onChange={(e) => {
+                            setDestinationCep(e.target.value);
+                            if (e.target.value.replace(/\D/g, '').length === 8) {
+                              handleCalculateCep(e.target.value);
+                            }
+                          }}
+                          style={{ backgroundColor: bgColor, color: textColor }}
+                          className="flex-1 border border-white/10 p-2 rounded-xl text-xs font-mono focus:outline-none"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => handleCalculateCep()}
+                          disabled={isCalculatingCep}
+                          style={{ backgroundColor: primaryColor, color: btnTextColor }}
+                          className="px-3 py-2 rounded-xl text-xs font-bold transition">
+                          {isCalculatingCep ? 'Calculando...' : 'Calcular'}
+                        </button>
+                      </div>
+
+                      {cepError && <p className="text-[10px] text-red-400 font-bold">{cepError}</p>}
+
+                      {calculatedOptions.length > 0 && (
+                        <div className="space-y-1.5 pt-2">
+                          <label className="text-[10px] opacity-70 block">Opções de Envio Disponíveis:</label>
+                          {calculatedOptions.map(opt => (
+                            <label
+                              key={opt.id}
+                              className={`flex justify-between items-center p-2 rounded-xl border text-xs cursor-pointer transition ${
+                                selectedShippingOption?.id === opt.id ? 'border-orange-500 bg-orange-500/10' : 'border-white/10 bg-black/30'
+                              }`}>
+                              <div className="flex items-center space-x-2">
+                                <input
+                                  type="radio"
+                                  name="shippingOption"
+                                  checked={selectedShippingOption?.id === opt.id}
+                                  onChange={() => setSelectedShippingOption(opt)}
+                                  className="accent-orange-500"
+                                />
+                                <div>
+                                  <span className="font-bold block text-white">{opt.name}</span>
+                                  <span className="text-[10px] opacity-60">Prazo: {opt.time}</span>
+                                </div>
+                              </div>
+                              <span className="font-bold text-orange-400">
+                                {opt.fee === 0 ? 'GRÁTIS' : `R$ ${opt.fee.toFixed(2)}`}
+                              </span>
+                            </label>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {(shippingMode === 'local' || (shippingMode === 'hybrid' && neighborhoods.length > 0)) && (
+                    <div>
+                      <label className="text-[11px] opacity-70 block mb-1">Selecione a Região / Bairro de Entrega:</label>
+                      <select
+                        value={selectedNeighId}
+                        onChange={(e) => setSelectedNeighId(e.target.value)}
+                        style={{ backgroundColor: bgColor, color: textColor }}
+                        className="w-full border border-white/10 p-2.5 rounded-xl text-xs focus:outline-none">
+                        <option value="">Taxa Padrão de Entrega (R$ {defaultFee.toFixed(2)})</option>
+                        {neighborhoods.map(n => (
+                          <option key={n.id} value={n.id}>{n.name} — R$ {Number(n.fee).toFixed(2)}</option>
+                        ))}
+                      </select>
+                    </div>
+                  )}
+                </>
               )}
 
               <div>
@@ -718,7 +872,7 @@ export default function EcommerceCliente() {
               {deliveryType === 'ENTREGA' && (
                 <div>
                   <label className="text-[11px] opacity-70 block mb-1">Endereço Completo de Entrega:</label>
-                  <input type="text" required value={customerAddress} onChange={(e) => setCustomerAddress(e.target.value)} style={{ backgroundColor: bgColor, color: textColor }} className="w-full border border-white/10 p-2.5 rounded-xl text-xs focus:outline-none" />
+                  <input type="text" required value={customerAddress} onChange={(e) => setCustomerAddress(e.target.value)} style={{ backgroundColor: bgColor, color: textColor }} className="w-full border border-white/10 p-2.5 rounded-xl text-xs focus:outline-none" placeholder="Rua, número, complemento, bairro, cidade/UF" />
                 </div>
               )}
 
@@ -747,7 +901,7 @@ export default function EcommerceCliente() {
                   <span>
                     {deliveryType === 'RETIRADA' 
                       ? 'Grátis' 
-                      : (isFreeShipping ? '🎉 FRETE GRÁTIS' : `R$ ${currentFee.toFixed(2)}`)}
+                      : (isFreeShipping ? '🎉 FRETE GRÁTIS' : `R$ ${activeShippingFee.toFixed(2)}`)}
                   </span>
                 </div>
 
