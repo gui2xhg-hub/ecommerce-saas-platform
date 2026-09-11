@@ -161,6 +161,8 @@ export default function EcommerceCliente() {
     const cleanCep = (cepToCalc || destinationCep).replace(/\D/g, '');
     if (cleanCep.length !== 8) {
       setCepError('Digite um CEP válido com 8 números.');
+      setCalculatedOptions([]);
+      setSelectedShippingOption(null);
       return;
     }
 
@@ -173,6 +175,8 @@ export default function EcommerceCliente() {
 
       if (data.erro) {
         setCepError('CEP não encontrado. Verifique o número digitado.');
+        setCalculatedOptions([]);
+        setSelectedShippingOption(null);
         setIsCalculatingCep(false);
         return;
       }
@@ -212,7 +216,9 @@ export default function EcommerceCliente() {
       setSelectedShippingOption(options[0]);
     } catch (err) {
       setCepError('Erro ao consultar o CEP. Tente novamente.');
-    } finally {
+      setCalculatedOptions([]);
+      setSelectedShippingOption(null);
+    } font-sans finally {
       setIsCalculatingCep(false);
     }
   };
@@ -789,9 +795,17 @@ export default function EcommerceCliente() {
                           placeholder="Ex: 01001-000"
                           value={destinationCep}
                           onChange={(e) => {
-                            setDestinationCep(e.target.value);
-                            if (e.target.value.replace(/\D/g, '').length === 8) {
-                              handleCalculateCep(e.target.value);
+                            const val = e.target.value;
+                            setDestinationCep(val);
+                            const cleanVal = val.replace(/\D/g, '');
+
+                            if (cleanVal.length === 8) {
+                              handleCalculateCep(val);
+                            } else {
+                              // LIMPA AS OPÇÕES SE O CEP FOR APAGADO OU ESTIVER INCOMPLETO
+                              setCalculatedOptions([]);
+                              setSelectedShippingOption(null);
+                              setCepError('');
                             }
                           }}
                           style={{ backgroundColor: bgColor, color: textColor }}
