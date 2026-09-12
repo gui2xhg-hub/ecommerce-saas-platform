@@ -15,7 +15,7 @@ export default function FilaProducao() {
     if (router.isReady && slug) {
       fetchData();
 
-      // INSCRIÇÃO NO SUPABASE REALTIME (ATUALIZAÇÃO EM TEMPO REAL QUANDO O PIX/CARTÃO É PAGO)
+      // INSCRIÇÃO NO SUPABASE REALTIME
       const channel = supabase
         .channel('realtime_orders_queue')
         .on(
@@ -72,7 +72,7 @@ export default function FilaProducao() {
       }
     } catch (err) {
       setErrorMessage("Erro inesperado: " + err.message);
-    } font-sans finally {
+    } finally {
       setLoading(false);
     }
   };
@@ -83,7 +83,7 @@ export default function FilaProducao() {
     fetchData();
   };
 
-  // VERIFICA SE O PEDIDO FOI PAGO (VIA BANCO DE DADOS OU TEXTO ANTIGO)
+  // VERIFICA SE O PEDIDO FOI PAGO
   const isOrderPaid = (order) => {
     return Boolean(order.is_paid) || Boolean(order.payment_method?.includes('PAGO'));
   };
@@ -98,6 +98,44 @@ export default function FilaProducao() {
 
     if (error) alert("Erro ao alterar pagamento: " + error.message);
     fetchData();
+  };
+
+  // ARQUIVAR PEDIDO PARA SAIR DA TELA SEM EXCLUIR DO BANCO
+  const handleArchiveOrder = async (orderId) => {
+    const { error } = await supabase
+      .from('orders')
+      .update({ status: 'arquivado' })
+      .eq('id', orderId);
+
+    if (error) {
+      alert("Erro ao arquivar pedido: " + error.message);
+    } else {
+      fetchData();
+    }
+  };
+
+  // ENVIAR NOTIFICAÇÃO NO WHATSAPP QUE SAIU PARA ENTREGA OU RETIRADA
+  const handleSendWhatsAppDelivery = (order) => {
+    if (!order.customer_phone) return alert("Telefone do cliente não encontrado.");
+
+    let cleanPhone = order.customer_phone.replace(/\D/g, '');
+    if (!cleanPhone.startsWith('55') && cleanPhone.length <= 11) {
+      cleanPhone = `55${cleanPhone}`;
+    }
+
+    const isPickup = order.address === 'Retirada na Loja' || order.neighborhood === 'Retirar na Loja';
+    let msg = `Olá *${order.customer_name}*! 👋\n\n`;
+
+    if (isPickup) {
+      msg += `Seu pedido *#${order.id}* na loja *${tenant?.name || 'nossa loja'}* já está *PRONTO PARA RETIRADA*! 🏪✨\n\n`;
+      msg += `Você já pode passar para retirar seu pacote. Estamos te aguardando!`;
+    } else {
+      msg += `Seu pedido *#${order.id}* na loja *${tenant?.name || 'nossa loja'}* *SAIU PARA ENTREGA*! 🛵💨\n\n`;
+      msg += `📍 *Endereço:* ${order.address}\n\n`;
+      msg += `Por favor, fique atento(a) no seu endereço para receber o entregador!`;
+    }
+
+    window.open(`https://wa.me/${cleanPhone}?text=${encodeURIComponent(msg)}`, '_blank');
   };
 
   const handleDeleteOrder = async (orderId) => {
@@ -194,7 +232,7 @@ export default function FilaProducao() {
           <div className="w-10 h-10 rounded-2xl bg-blue-600 flex items-center justify-center font-bold text-xl text-white">🛍️</div>
           <div>
             <h1 className="font-bold text-lg text-white">Fila de Produção — {tenant?.name || slug}</h1>
-            <p className="text-xs text-gray-400">Gerencie pedidos, pagamentos automáticos e envios em tempo real</p>
+            <p className="text-xs text-gray-400">Gerencie pedidos, envios, avisos via WhatsApp e arquivamento</p>
           </div>
         </div>
         <button onClick={fetchData} className="bg-orange-500 hover:bg-orange-600 text-white text-xs font-bold px-4 py-2 rounded-xl transition">
@@ -248,7 +286,6 @@ export default function FilaProducao() {
                     </div>
                   </div>
 
-                  {/* BLOCO DE INFORMAÇÕES DE FRETE E ENVIO */}
                   <div className="bg-gray-900 p-2.5 rounded-xl border border-gray-800/80 text-xs space-y-1">
                     <div className="flex justify-between items-center mb-1">
                       <span className={`text-[10px] font-bold px-2 py-0.5 rounded-md ${isPickup ? 'bg-purple-500/20 text-purple-300 border border-purple-500/30' : 'bg-blue-500/20 text-blue-300 border border-blue-500/30'}`}>
@@ -372,19 +409,30 @@ export default function FilaProducao() {
             <p className="text-xs text-gray-500 text-center py-4">Nenhum pedido concluído.</p>
           ) : (
             concluidos.map(o => (
-              <div key={o.id} className="bg-gray-950 p-4 rounded-2xl border border-gray-800 space-y-2 opacity-80">
+              <div key={o.id} className="bg-gray-950 p-4 rounded-2xl border border-gray-800 space-y-3 shadow-lg">
                 <div className="flex justify-between items-start">
                   <div>
                     <h3 className="font-bold text-sm text-white">PEDIDO #{o.id}</h3>
-                    <p className="text-xs text-gray-300">{o.customer_name}</p>
+                    <p className="text-xs text-gray-300 font-bold">{o.customer_name}</p>
                   </div>
                   <span className="text-[10px] font-bold px-2.5 py-1 rounded-xl bg-green-500/20 text-green-400 border border-green-500/30">
-                    ✓ ENVIADO
+                    ✓ PRONTO / ENVIADO
                   </span>
                 </div>
-                <div className="flex space-x-2 pt-2">
+
+                {/* BOTÃO PARA ENVIAR NOTIFICAÇÃO DO WHATSAPP */}
+                <button
+                  onClick={() => handleSendWhatsAppDelivery(o)}
+                  className="w-full bg-green-600 hover:bg-green-500 text-white font-bold py-2 rounded-xl text-xs transition flex items-center justify-center space-x-2 shadow-md">
+                  <span>📱 Avisar Cliente no WhatsApp</span>
+                </button>
+
+                <div className="flex space-x-2 pt-1 border-t border-gray-800/80">
                   <button onClick={() => handlePrintOrder(o)} className="flex-1 bg-gray-900 hover:bg-gray-800 text-gray-300 py-1.5 rounded-xl font-bold text-[11px] border border-gray-800">
                     🖨️ Etiqueta
+                  </button>
+                  <button onClick={() => handleArchiveOrder(o.id)} className="flex-1 bg-blue-500/20 hover:bg-blue-500/30 text-blue-300 py-1.5 rounded-xl font-bold text-[11px] border border-blue-500/30">
+                    📁 Arquivar
                   </button>
                   <button onClick={() => handleDeleteOrder(o.id)} className="bg-red-500/20 hover:bg-red-500/30 text-red-400 px-3 py-1.5 rounded-xl font-bold text-[11px] border border-red-500/30">
                     🗑️
