@@ -13,10 +13,10 @@ export default function EcommerceCliente() {
   const [selectedCat, setSelectedCat] = useState('ALL');
   const [loading, setLoading] = useState(true);
 
-  // LISTA DE TAMANHOS DE ROUPA PADRÃO (FALLBACK PARA VESTUÁRIO/FASHION)
+  // LISTA DE TAMANHOS DE ROUPA PADRÃO
   const DEFAULT_FASHION_SIZES = ['P', 'M', 'G', 'GG', 'XG'];
 
-  // MODAL DE DETALHES DO PRODUTO (GALERIA, VARIAÇÕES DINÂMICAS E OBSERVAÇÃO)
+  // MODAL DE DETALHES DO PRODUTO
   const [selectedProduct, setSelectedProduct] = useState(null);
   const [activeImage, setActiveImage] = useState('');
   const [selectedVariations, setSelectedVariations] = useState({});
@@ -39,17 +39,17 @@ export default function EcommerceCliente() {
   const [pixQrCodeBase64, setPixQrCodeBase64] = useState('');
   const [pixCopyPaste, setPixCopyPaste] = useState('');
   const [pixPaymentId, setPixPaymentId] = useState(null);
-  const [pixStatus, setPixStatus] = useState('pending'); // 'pending', 'approved', 'error'
+  const [pixStatus, setPixStatus] = useState('pending');
   const [pixCopySuccess, setPixCopySuccess] = useState(false);
   const [currentOrderId, setCurrentOrderId] = useState(null);
   const [currentOrderPayload, setCurrentOrderPayload] = useState(null);
 
-  // ESTADOS DO MEUS PEDIDOS (RASTREAMENTO DO CLIENTE)
+  // ESTADOS DO MEUS PEDIDOS
   const [showMyOrdersModal, setShowMyOrdersModal] = useState(false);
   const [myOrdersList, setMyOrdersList] = useState([]);
   const [loadingMyOrders, setLoadingMyOrders] = useState(false);
 
-  // CÁLCULO DE FRETE POR CEP (NACIONAL / HÍBRIDO)
+  // CÁLCULO DE FRETE POR CEP
   const [destinationCep, setDestinationCep] = useState('');
   const [isCalculatingCep, setIsCalculatingCep] = useState(false);
   const [calculatedOptions, setCalculatedOptions] = useState([]);
@@ -67,7 +67,7 @@ export default function EcommerceCliente() {
     }
   }, [router.isReady, slug]);
 
-  // MONITORAMENTO E CHECAGEM EM TEMPO REAL DO PIX DINÂMICO (POLLING A CADA 3.5s)
+  // MONITORAMENTO EM TEMPO REAL DO PIX DINÂMICO (POLLING)
   useEffect(() => {
     let interval = null;
     if (showPixModal && pixPaymentId && tenant?.pix_access_token && pixStatus !== 'approved') {
@@ -245,6 +245,7 @@ export default function EcommerceCliente() {
     setCart(cart.filter(item => item.cartItemId !== cartItemId));
   };
 
+  // FUNÇÃO DE CÁLCULO DE CEP CORRIGIDA
   const handleCalculateCep = async (cepToCalc) => {
     const cleanCep = (cepToCalc || destinationCep).replace(/\D/g, '');
     if (cleanCep.length !== 8) {
@@ -304,7 +305,7 @@ export default function EcommerceCliente() {
       setCepError('Erro ao consultar o CEP. Tente novamente.');
       setCalculatedOptions([]);
       setSelectedShippingOption(null);
-    } font-sans finally {
+    } finally {
       setIsCalculatingCep(false);
     }
   };
@@ -433,9 +434,6 @@ export default function EcommerceCliente() {
 
   const promoBannerList = tenant?.promo_banners ? tenant.promo_banners.split(',').map(b => b.trim()).filter(Boolean) : [];
 
-  // ==========================================
-  // FUNÇÃO DE FINALIZAR O PEDIDO
-  // ==========================================
   const handleFinishOrder = async (e) => {
     e.preventDefault();
     if (cart.length === 0) return alert("Seu carrinho está vazio!");
@@ -492,9 +490,7 @@ export default function EcommerceCliente() {
       return;
     }
 
-    // SALVA NO LOCALSTORAGE DO NAVEGADOR DO CLIENTE
     saveOrderIdToLocal(insertedOrder.id);
-
     setCurrentOrderId(insertedOrder.id);
     setCurrentOrderPayload({ ...orderPayload, shippingLabel });
 
@@ -502,7 +498,6 @@ export default function EcommerceCliente() {
       window.fbq('track', 'Purchase', { value: total, currency: 'BRL' });
     }
 
-    // 1. PAGAMENTO VIA PIX DINÂMICO
     const isPixDynamic = paymentMethod === 'PIX' && tenant.pix_enabled && tenant.pix_access_token;
 
     if (isPixDynamic) {
@@ -546,7 +541,6 @@ export default function EcommerceCliente() {
       }
     }
 
-    // 2. PAGAMENTO VIA CARTÃO DE CRÉDITO OU DÉBITO
     const isCardPayment = paymentMethod.includes('Cartão') && tenant.pix_access_token;
 
     if (isCardPayment) {
@@ -585,9 +579,7 @@ export default function EcommerceCliente() {
       }
     }
 
-    // 3. PAGAMENTO PRESENCIAL / DINHEIRO
     sendWhatsAppNotification(insertedOrder, false);
-
     setIsSubmitting(false);
     setCart([]);
     setShowCartModal(false);
@@ -614,7 +606,6 @@ export default function EcommerceCliente() {
         <img src={tenant.banner_url || 'https://images.unsplash.com/photo-1441986300917-64674bd600d8?w=800&auto=format&fit=crop&q=80'} alt="Capa da Loja" className="w-full h-full object-cover opacity-50" />
         
         <div className="absolute top-3 right-3 flex items-center space-x-2 z-10">
-          {/* BOTÃO MEUS PEDIDOS */}
           <button
             onClick={handleOpenMyOrders}
             className="bg-gray-900/90 hover:bg-black text-white font-bold text-[10px] px-3 py-1.5 rounded-full border border-white/20 shadow-lg transition flex items-center space-x-1">
@@ -652,7 +643,7 @@ export default function EcommerceCliente() {
         </div>
       )}
 
-      {/* CATEGORIAS + ABA DE PROMOÇÕES 🔥 */}
+      {/* CATEGORIAS + ABA DE PROMOÇÕES */}
       <div className={`${promoBannerList.length > 0 ? 'mt-4' : 'mt-8'} px-4`}>
         <div className="flex space-x-2 overflow-x-auto pb-2 scrollbar-none">
           <button
@@ -757,7 +748,7 @@ export default function EcommerceCliente() {
         </div>
       )}
 
-      {/* MODAL MEUS PEDIDOS / HISTÓRICO */}
+      {/* MODAL MEUS PEDIDOS */}
       {showMyOrdersModal && (
         <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 p-4">
           <div style={{ backgroundColor: cardColor, color: textColor }} className="border border-white/10 w-full max-w-sm rounded-2xl p-5 space-y-4 shadow-2xl max-h-[90vh] overflow-y-auto">
@@ -991,7 +982,6 @@ export default function EcommerceCliente() {
               ))}
             </div>
 
-            {/* APLICAR CUPOM DE DESCONTO */}
             <form onSubmit={handleApplyCoupon} className="pt-2 border-t border-white/10 space-y-1.5">
               <label className="text-[11px] opacity-70 block">🎟️ Possui um Cupom de Desconto?</label>
               <div className="flex space-x-2">
@@ -1044,7 +1034,6 @@ export default function EcommerceCliente() {
                 )}
               </div>
 
-              {/* CÁLCULO DE FRETE SEGUNDO O MODO DA LOJA */}
               {deliveryType === 'ENTREGA' && (
                 <>
                   {(shippingMode === 'national' || shippingMode === 'hybrid') && (
@@ -1197,7 +1186,7 @@ export default function EcommerceCliente() {
         </div>
       )}
 
-      {/* MODAL DE PAGAMENTO PIX DINÂMICO COM TELA DE QR CODE E POLLING */}
+      {/* MODAL PIX DINÂMICO */}
       {showPixModal && (
         <div className="fixed inset-0 bg-black/90 flex items-center justify-center z-50 p-4">
           <div style={{ backgroundColor: cardColor, color: textColor }} className="border border-green-500/40 w-full max-w-sm rounded-3xl p-6 space-y-4 shadow-2xl text-center relative overflow-hidden">
@@ -1208,7 +1197,6 @@ export default function EcommerceCliente() {
               <p className="text-[11px] opacity-70">Escaneie o QR Code ou copie a chave para pagar no app do seu banco.</p>
             </div>
 
-            {/* STATUS DO PAGAMENTO */}
             {pixStatus === 'approved' ? (
               <div className="bg-green-500/20 border border-green-500/50 p-3 rounded-2xl space-y-1 animate-bounce">
                 <span className="text-xl">✅</span>
@@ -1222,7 +1210,6 @@ export default function EcommerceCliente() {
               </div>
             )}
 
-            {/* QR CODE DA API DO MERCADO PAGO */}
             {pixQrCodeBase64 && (
               <div className="bg-white p-3 rounded-2xl inline-block shadow-lg mx-auto border border-gray-200">
                 <img 
@@ -1233,7 +1220,6 @@ export default function EcommerceCliente() {
               </div>
             )}
 
-            {/* VALOR E CHAVE COPIA E COLA */}
             <div className="space-y-2">
               <span className="text-xs text-gray-400 block font-bold">Valor Total: <b className="text-green-400 text-sm">R$ {total.toFixed(2)}</b></span>
               
@@ -1247,7 +1233,6 @@ export default function EcommerceCliente() {
               </button>
             </div>
 
-            {/* BOTOES DE AÇÃO */}
             <div className="pt-2 border-t border-white/10 space-y-2">
               <button
                 type="button"
