@@ -27,6 +27,7 @@ export default function EcommerceCliente() {
   const [cart, setCart] = useState([]);
   const [showCartModal, setShowCartModal] = useState(false);
   const [deliveryType, setDeliveryType] = useState('ENTREGA');
+  const [hybridOption, setHybridOption] = useState('bairro'); // 'bairro' ou 'cep'
   const [selectedNeighId, setSelectedNeighId] = useState('');
   const [customerName, setCustomerName] = useState('');
   const [customerPhone, setCustomerPhone] = useState('');
@@ -136,7 +137,6 @@ export default function EcommerceCliente() {
     setLoading(false);
   };
 
-  // SALVAR ID DO PEDIDO NO LOCALSTORAGE
   const saveOrderIdToLocal = (orderId) => {
     if (typeof window !== 'undefined' && tenant?.id) {
       const storageKey = `my_orders_${tenant.id}`;
@@ -148,7 +148,6 @@ export default function EcommerceCliente() {
     }
   };
 
-  // BUSCAR HISTÓRICO DE PEDIDOS DO CLIENTE
   const handleOpenMyOrders = async () => {
     setShowMyOrdersModal(true);
     setLoadingMyOrders(true);
@@ -245,7 +244,6 @@ export default function EcommerceCliente() {
     setCart(cart.filter(item => item.cartItemId !== cartItemId));
   };
 
-  // FUNÇÃO DE CÁLCULO DE CEP CORRIGIDA
   const handleCalculateCep = async (cepToCalc) => {
     const cleanCep = (cepToCalc || destinationCep).replace(/\D/g, '');
     if (cleanCep.length !== 8) {
@@ -378,7 +376,7 @@ export default function EcommerceCliente() {
     }
   };
 
-  // CÁLCULOS GERAIS DA PÁGINA
+  // CÁLCULOS GERAIS E FRETE
   const primaryColor = tenant?.primary_color || '#FF8C00';
   const btnTextColor = tenant?.button_text_color || '#FFFFFF';
   const bgColor = tenant?.background_color || tenant?.secondary_color || '#090D16';
@@ -386,12 +384,11 @@ export default function EcommerceCliente() {
   const textColor = tenant?.text_color || '#FFFFFF';
 
   const shippingMode = tenant?.shipping_mode || 'local';
-  const defaultFee = Number(tenant?.default_shipping_fee ?? 10.00);
   const freeThreshold = Number(tenant?.free_shipping_threshold ?? 0.00);
   const allowPickup = tenant?.enable_pickup ?? true;
 
   const selectedNeighborhood = neighborhoods.find(n => String(n.id) === String(selectedNeighId));
-  const localShippingFee = selectedNeighborhood ? Number(selectedNeighborhood.fee) : defaultFee;
+  const localShippingFee = selectedNeighborhood ? Number(selectedNeighborhood.fee) : 0;
 
   const subtotal = cart.reduce((sum, item) => sum + (Number(item.price) * item.quantity), 0);
   const isFreeShipping = freeThreshold > 0 && subtotal >= freeThreshold;
@@ -399,16 +396,10 @@ export default function EcommerceCliente() {
   let activeShippingFee = 0;
   if (deliveryType === 'RETIRADA') {
     activeShippingFee = 0;
-  } else if (shippingMode === 'local') {
+  } else if (shippingMode === 'local' || (shippingMode === 'hybrid' && hybridOption === 'bairro')) {
     activeShippingFee = isFreeShipping ? 0 : localShippingFee;
-  } else if (shippingMode === 'national') {
+  } else if (shippingMode === 'national' || (shippingMode === 'hybrid' && hybridOption === 'cep')) {
     activeShippingFee = isFreeShipping ? 0 : (selectedShippingOption ? selectedShippingOption.fee : 0);
-  } else if (shippingMode === 'hybrid') {
-    if (selectedShippingOption) {
-      activeShippingFee = isFreeShipping ? 0 : selectedShippingOption.fee;
-    } else {
-      activeShippingFee = isFreeShipping ? 0 : localShippingFee;
-    }
   }
 
   let discountValue = 0;
@@ -438,15 +429,30 @@ export default function EcommerceCliente() {
     e.preventDefault();
     if (cart.length === 0) return alert("Seu carrinho está vazio!");
     if (!customerName || !customerPhone) return alert("Preencha seu Nome e WhatsApp!");
-    if (deliveryType === 'ENTREGA' && !customerAddress) return alert("Preencha seu Endereço para entrega!");
     if (!tenant || !tenant.id) return alert("Erro: Dados da loja não carregados corretamente.");
+
+    if (deliveryType === 'ENTREGA') {
+      if (!customerAddress) return alert("Preencha seu Endereço para entrega!");
+
+      if (shippingMode === 'local' || (shippingMode === 'hybrid' && hybridOption === 'bairro')) {
+        if (neighborhoods.length > 0 && !selectedNeighId) {
+          return alert("Por favor, selecione seu Bairro de entrega!");
+        }
+      }
+
+      if (shippingMode === 'national' || (shippingMode === 'hybrid' && hybridOption === 'cep')) {
+        if (!selectedShippingOption) {
+          return alert("Por favor, informe seu CEP e selecione uma opção de envio!");
+        }
+      }
+    }
 
     setIsSubmitting(true);
 
     let shippingLabel = 'Retirar na Loja';
     if (deliveryType === 'ENTREGA') {
-      if (shippingMode === 'local') {
-        shippingLabel = selectedNeighborhood ? selectedNeighborhood.name : 'Entrega Local';
+      if (shippingMode === 'local' || (shippingMode === 'hybrid' && hybridOption === 'bairro')) {
+        shippingLabel = selectedNeighborhood ? `Bairro: ${selectedNeighborhood.name}` : 'Entrega Local';
       } else if (selectedShippingOption) {
         shippingLabel = `${selectedShippingOption.name} (${selectedShippingOption.time})`;
       } else {
@@ -601,6 +607,14 @@ export default function EcommerceCliente() {
 
   return (
     <div className="min-h-screen font-sans pb-24 max-w-md mx-auto transition-colors duration-300" style={{ backgroundColor: bgColor, color: textColor }}>
+      
+      {/* BARRA DE AVISOS E COMUNICADOS (DESTAQUE NO TOPO) */}
+      {tenant.custom_message && (
+        <div className="bg-gradient-to-r from-orange-600 via-amber-600 to-orange-500 text-white text-[11px] font-bold py-2.5 px-4 text-center shadow-md flex items-center justify-center space-x-2">
+          <span>📢 {tenant.custom_message}</span>
+        </div>
+      )}
+
       {/* CAPA DA LOJA */}
       <div className="relative h-36 bg-gray-900 border-b border-white/10">
         <img src={tenant.banner_url || 'https://images.unsplash.com/photo-1441986300917-64674bd600d8?w=800&auto=format&fit=crop&q=80'} alt="Capa da Loja" className="w-full h-full object-cover opacity-50" />
@@ -938,7 +952,7 @@ export default function EcommerceCliente() {
         </div>
       )}
 
-      {/* MODAL DO CARRINHO & CHECKOUT */}
+      {/* MODAL DO CARRINHO & CHECKOUT (FRETE E BAIRROS DESCOMPLICADOS) */}
       {showCartModal && (
         <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 p-4">
           <div style={{ backgroundColor: cardColor, color: textColor }} className="border border-white/10 w-full max-w-sm rounded-2xl p-5 space-y-4 shadow-2xl max-h-[90vh] overflow-y-auto">
@@ -1036,7 +1050,30 @@ export default function EcommerceCliente() {
 
               {deliveryType === 'ENTREGA' && (
                 <>
-                  {(shippingMode === 'national' || shippingMode === 'hybrid') && (
+                  {/* ALTERNADOR EXCLUSIVO PARA MODO HÍBRIDO */}
+                  {shippingMode === 'hybrid' && (
+                    <div className="flex space-x-2 mb-2 bg-black/40 p-1 rounded-xl border border-white/10">
+                      <button
+                        type="button"
+                        onClick={() => setHybridOption('bairro')}
+                        className={`flex-1 py-1.5 rounded-lg text-[10px] font-bold transition ${
+                          hybridOption === 'bairro' ? 'bg-orange-500 text-white shadow' : 'text-gray-400 hover:text-white'
+                        }`}>
+                        🛵 Entrega por Bairro
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setHybridOption('cep')}
+                        className={`flex-1 py-1.5 rounded-lg text-[10px] font-bold transition ${
+                          hybridOption === 'cep' ? 'bg-orange-500 text-white shadow' : 'text-gray-400 hover:text-white'
+                        }`}>
+                        📦 Envio por CEP
+                      </button>
+                    </div>
+                  )}
+
+                  {/* CÁLCULO DE CEP (APENAS QUANDO SELECIONADO CEP OU MODO NACIONAL) */}
+                  {(shippingMode === 'national' || (shippingMode === 'hybrid' && hybridOption === 'cep')) && (
                     <div className="space-y-2 p-3 rounded-xl border border-white/10 bg-black/20">
                       <label className="text-[11px] font-bold block text-orange-400">📦 Digite seu CEP para calcular o Frete:</label>
                       <div className="flex space-x-2">
@@ -1104,15 +1141,16 @@ export default function EcommerceCliente() {
                     </div>
                   )}
 
-                  {(shippingMode === 'local' || (shippingMode === 'hybrid' && neighborhoods.length > 0)) && (
+                  {/* SELEÇÃO DE BAIRROS (APENAS QUANDO MODO LOCAL OU HÍBRIDO BAIRRO) */}
+                  {(shippingMode === 'local' || (shippingMode === 'hybrid' && hybridOption === 'bairro')) && (
                     <div>
-                      <label className="text-[11px] opacity-70 block mb-1">Selecione a Região / Bairro de Entrega:</label>
+                      <label className="text-[11px] opacity-70 block mb-1">Selecione seu Bairro de Entrega:</label>
                       <select
                         value={selectedNeighId}
                         onChange={(e) => setSelectedNeighId(e.target.value)}
                         style={{ backgroundColor: bgColor, color: textColor }}
-                        className="w-full border border-white/10 p-2.5 rounded-xl text-xs focus:outline-none">
-                        <option value="">Taxa Padrão de Entrega (R$ {defaultFee.toFixed(2)})</option>
+                        className="w-full border border-white/10 p-2.5 rounded-xl text-xs focus:outline-none font-bold">
+                        <option value="">-- Selecione seu Bairro --</option>
                         {neighborhoods.map(n => (
                           <option key={n.id} value={n.id}>{n.name} — R$ {Number(n.fee).toFixed(2)}</option>
                         ))}
