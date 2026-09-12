@@ -15,6 +15,7 @@ export default function FilaProducao() {
     if (router.isReady && slug) {
       fetchData();
 
+      // INSCRIÇÃO NO SUPABASE REALTIME (ATUALIZAÇÃO EM TEMPO REAL QUANDO O PIX/CARTÃO É PAGO)
       const channel = supabase
         .channel('realtime_orders_queue')
         .on(
@@ -71,7 +72,7 @@ export default function FilaProducao() {
       }
     } catch (err) {
       setErrorMessage("Erro inesperado: " + err.message);
-    } finally {
+    } font-sans finally {
       setLoading(false);
     }
   };
@@ -82,9 +83,19 @@ export default function FilaProducao() {
     fetchData();
   };
 
+  // VERIFICA SE O PEDIDO FOI PAGO (VIA BANCO DE DADOS OU TEXTO ANTIGO)
+  const isOrderPaid = (order) => {
+    return Boolean(order.is_paid) || Boolean(order.payment_method?.includes('PAGO'));
+  };
+
+  // ALTERAR MANUALMENTE O STATUS DE PAGAMENTO
   const togglePaymentStatus = async (order) => {
-    const newPayment = order.payment_method?.includes('PAGO') ? 'PIX / Pendente' : 'PIX / PAGO 🟢';
-    const { error } = await supabase.from('orders').update({ payment_method: newPayment }).eq('id', order.id);
+    const currentPaidStatus = isOrderPaid(order);
+    const { error } = await supabase
+      .from('orders')
+      .update({ is_paid: !currentPaidStatus })
+      .eq('id', order.id);
+
     if (error) alert("Erro ao alterar pagamento: " + error.message);
     fetchData();
   };
@@ -101,6 +112,7 @@ export default function FilaProducao() {
     const printWindow = window.open('', '_blank', 'width=600,height=700');
     const itemsList = Array.isArray(order.items) ? order.items : [];
     const isPickup = order.address === 'Retirada na Loja' || order.neighborhood === 'Retirar na Loja';
+    const paidText = isOrderPaid(order) ? 'PAGO 🟢' : 'PENDENTE 🔴';
 
     const htmlContent = `
       <!DOCTYPE html>
@@ -132,7 +144,7 @@ export default function FilaProducao() {
           <b>TEL:</b> ${order.customer_phone || 'N/A'}<br/>
           <b>ENDEREÇO:</b> ${order.address || 'N/A'}<br/>
           <b>TIPO DE ENVIO:</b> ${order.neighborhood || (isPickup ? 'Retirada' : 'Entrega')}<br/>
-          <b>PAGAMENTO:</b> ${order.payment_method || 'PIX'}
+          <b>PAGAMENTO:</b> ${order.payment_method || 'PIX'} (${paidText})
         </div>
 
         <div class="section">
@@ -182,7 +194,7 @@ export default function FilaProducao() {
           <div className="w-10 h-10 rounded-2xl bg-blue-600 flex items-center justify-center font-bold text-xl text-white">🛍️</div>
           <div>
             <h1 className="font-bold text-lg text-white">Fila de Produção — {tenant?.name || slug}</h1>
-            <p className="text-xs text-gray-400">Gerencie pedidos, regras de frete e envio em tempo real</p>
+            <p className="text-xs text-gray-400">Gerencie pedidos, pagamentos automáticos e envios em tempo real</p>
           </div>
         </div>
         <button onClick={fetchData} className="bg-orange-500 hover:bg-orange-600 text-white text-xs font-bold px-4 py-2 rounded-xl transition">
@@ -211,6 +223,7 @@ export default function FilaProducao() {
             novos.map(o => {
               const isPickup = o.address === 'Retirada na Loja' || o.neighborhood === 'Retirar na Loja';
               const isFreeShipping = Number(o.delivery_fee) === 0 && !isPickup;
+              const paid = isOrderPaid(o);
 
               return (
                 <div key={o.id} className="bg-gray-950 p-4 rounded-2xl border border-gray-800 space-y-3 shadow-lg">
@@ -221,9 +234,18 @@ export default function FilaProducao() {
                       <p className="text-[11px] text-gray-400">📱 {o.customer_phone}</p>
                     </div>
 
-                    <button onClick={() => togglePaymentStatus(o)} className={`text-[10px] font-bold px-2.5 py-1 rounded-xl border transition ${o.payment_method?.includes('PAGO') ? 'bg-green-500/20 text-green-400 border-green-500/30' : 'bg-red-500/20 text-red-400 border-red-500/30'}`}>
-                      {o.payment_method?.includes('PAGO') ? '🟢 PAGO' : '🔴 PENDENTE'}
-                    </button>
+                    <div className="flex flex-col items-end space-y-1">
+                      <span className="text-[10px] font-bold text-gray-400 bg-gray-900 px-2 py-0.5 rounded-md border border-gray-800">
+                        {o.payment_method || 'PIX'}
+                      </span>
+                      <button 
+                        onClick={() => togglePaymentStatus(o)} 
+                        className={`text-[10px] font-bold px-2.5 py-1 rounded-xl border transition ${
+                          paid ? 'bg-green-500/20 text-green-400 border-green-500/30' : 'bg-red-500/20 text-red-400 border-red-500/30'
+                        }`}>
+                        {paid ? '🟢 PAGO' : '🔴 PENDENTE'}
+                      </button>
+                    </div>
                   </div>
 
                   {/* BLOCO DE INFORMAÇÕES DE FRETE E ENVIO */}
@@ -288,43 +310,55 @@ export default function FilaProducao() {
           {emProducao.length === 0 ? (
             <p className="text-xs text-gray-500 text-center py-4">Nenhum pedido em produção.</p>
           ) : (
-            emProducao.map(o => (
-              <div key={o.id} className="bg-gray-950 p-4 rounded-2xl border border-blue-500/30 space-y-3 shadow-lg">
-                <div className="flex justify-between items-start">
-                  <div>
-                    <h3 className="font-bold text-sm text-white">PEDIDO #{o.id}</h3>
-                    <p className="text-xs text-gray-300 font-bold mt-0.5">{o.customer_name}</p>
+            emProducao.map(o => {
+              const paid = isOrderPaid(o);
+              return (
+                <div key={o.id} className="bg-gray-950 p-4 rounded-2xl border border-blue-500/30 space-y-3 shadow-lg">
+                  <div className="flex justify-between items-start">
+                    <div>
+                      <h3 className="font-bold text-sm text-white">PEDIDO #{o.id}</h3>
+                      <p className="text-xs text-gray-300 font-bold mt-0.5">{o.customer_name}</p>
+                    </div>
+                    <div className="flex flex-col items-end space-y-1">
+                      <span className="text-[10px] font-bold text-gray-400 bg-gray-900 px-2 py-0.5 rounded-md border border-gray-800">
+                        {o.payment_method || 'PIX'}
+                      </span>
+                      <button 
+                        onClick={() => togglePaymentStatus(o)} 
+                        className={`text-[10px] font-bold px-2.5 py-1 rounded-xl border transition ${
+                          paid ? 'bg-green-500/20 text-green-400 border-green-500/30' : 'bg-red-500/20 text-red-400 border-red-500/30'
+                        }`}>
+                        {paid ? '🟢 PAGO' : '🔴 PENDENTE'}
+                      </button>
+                    </div>
                   </div>
-                  <button onClick={() => togglePaymentStatus(o)} className={`text-[10px] font-bold px-2.5 py-1 rounded-xl border transition ${o.payment_method?.includes('PAGO') ? 'bg-green-500/20 text-green-400 border-green-500/30' : 'bg-red-500/20 text-red-400 border-red-500/30'}`}>
-                    {o.payment_method?.includes('PAGO') ? '🟢 PAGO' : '🔴 PENDENTE'}
+
+                  <div className="space-y-1 border-t border-gray-800 pt-2 text-xs">
+                    {Array.isArray(o.items) && o.items.map((it, idx) => (
+                      <div key={idx} className="flex justify-between text-gray-200">
+                        <span><b>{it.quantity}x</b> {it.name} {it.variationsText ? `(${it.variationsText})` : (it.size ? `(${it.size})` : '')}</span>
+                      </div>
+                    ))}
+                  </div>
+
+                  <div className="flex justify-between items-center pt-2 border-t border-gray-800 text-xs">
+                    <span className="font-bold text-green-400">R$ {Number(o.total || 0).toFixed(2)}</span>
+                    <div className="flex space-x-1.5">
+                      <button onClick={() => handlePrintOrder(o)} className="bg-gray-800 hover:bg-gray-700 text-gray-200 px-2.5 py-1 rounded-lg font-bold text-[11px] border border-gray-700">
+                        🖨️
+                      </button>
+                      <button onClick={() => handleDeleteOrder(o.id)} className="bg-red-500/20 hover:bg-red-500/30 text-red-400 px-2.5 py-1 rounded-lg font-bold text-[11px] border border-red-500/30">
+                        🗑️
+                      </button>
+                    </div>
+                  </div>
+
+                  <button onClick={() => updateOrderStatus(o.id, 'pronto')} className="w-full bg-green-600 hover:bg-green-700 text-white font-bold py-2.5 rounded-xl text-xs transition">
+                    📦 Marcar como Pronto / Enviado ➔
                   </button>
                 </div>
-
-                <div className="space-y-1 border-t border-gray-800 pt-2 text-xs">
-                  {Array.isArray(o.items) && o.items.map((it, idx) => (
-                    <div key={idx} className="flex justify-between text-gray-200">
-                      <span><b>{it.quantity}x</b> {it.name} {it.variationsText ? `(${it.variationsText})` : (it.size ? `(${it.size})` : '')}</span>
-                    </div>
-                  ))}
-                </div>
-
-                <div className="flex justify-between items-center pt-2 border-t border-gray-800 text-xs">
-                  <span className="font-bold text-green-400">R$ {Number(o.total || 0).toFixed(2)}</span>
-                  <div className="flex space-x-1.5">
-                    <button onClick={() => handlePrintOrder(o)} className="bg-gray-800 hover:bg-gray-700 text-gray-200 px-2.5 py-1 rounded-lg font-bold text-[11px] border border-gray-700">
-                      🖨️
-                    </button>
-                    <button onClick={() => handleDeleteOrder(o.id)} className="bg-red-500/20 hover:bg-red-500/30 text-red-400 px-2.5 py-1 rounded-lg font-bold text-[11px] border border-red-500/30">
-                      🗑️
-                    </button>
-                  </div>
-                </div>
-
-                <button onClick={() => updateOrderStatus(o.id, 'pronto')} className="w-full bg-green-600 hover:bg-green-700 text-white font-bold py-2.5 rounded-xl text-xs transition">
-                  📦 Marcar como Pronto / Enviado ➔
-                </button>
-              </div>
-            ))
+              );
+            })
           )}
         </div>
 
