@@ -224,7 +224,6 @@ export default function EcommerceCliente() {
         setCustomerAddress(`${data.logradouro}, nº , ${data.bairro} - ${data.localidade}/${data.uf}`);
       }
 
-      // Cálculo de Peso Total do Carrinho
       const totalWeight = cart.reduce((acc, item) => {
         const prod = products.find(p => p.id === item.id);
         return acc + ((prod?.weight_kg || 0.3) * item.quantity);
@@ -233,7 +232,6 @@ export default function EcommerceCliente() {
       const isFree = freeThreshold > 0 && subtotal >= freeThreshold;
       const options = [];
 
-      // Cálculo PAC e SEDEX para Envio Nacional / Híbrido
       const basePacFee = Math.max(16.50, 16.50 + (totalWeight - 0.5) * 4.5);
       const baseSedexFee = Math.max(28.90, 28.90 + (totalWeight - 0.5) * 8.0);
 
@@ -296,7 +294,7 @@ export default function EcommerceCliente() {
     let itemsText = cart.map(i => {
       let varStr = i.variationsText ? ` [${i.variationsText}]` : '';
       let txt = `• ${i.quantity}x ${i.name}${varStr} (R$ ${(Number(i.price) * i.quantity).toFixed(2)})`;
-      if (i.note) txt += `\n   Obs: _"${i.note}"_`;
+      if (i.note) txt += `\n    Obs: _"${i.note}"_`;
       return txt;
     }).join('\n\n');
 
@@ -330,19 +328,17 @@ export default function EcommerceCliente() {
     }
   };
 
-  if (loading) return <div className="min-h-screen bg-gray-950 text-white flex items-center justify-center font-sans"><p className="text-xs text-gray-400">Carregando loja...</p></div>;
-  if (!tenant) return <div className="min-h-screen bg-gray-950 text-white flex items-center justify-center font-sans"><h1 className="text-xl font-bold text-orange-500">Loja não encontrada</h1></div>;
+  // CÁLCULOS GERAIS DA PÁGINA
+  const primaryColor = tenant?.primary_color || '#FF8C00';
+  const btnTextColor = tenant?.button_text_color || '#FFFFFF';
+  const bgColor = tenant?.background_color || tenant?.secondary_color || '#090D16';
+  const cardColor = tenant?.card_color || '#111827';
+  const textColor = tenant?.text_color || '#FFFFFF';
 
-  const primaryColor = tenant.primary_color || '#FF8C00';
-  const btnTextColor = tenant.button_text_color || '#FFFFFF';
-  const bgColor = tenant.background_color || tenant.secondary_color || '#090D16';
-  const cardColor = tenant.card_color || '#111827';
-  const textColor = tenant.text_color || '#FFFFFF';
-
-  const shippingMode = tenant.shipping_mode || 'local';
-  const defaultFee = Number(tenant.default_shipping_fee ?? 10.00);
-  const freeThreshold = Number(tenant.free_shipping_threshold ?? 0.00);
-  const allowPickup = tenant.enable_pickup ?? true;
+  const shippingMode = tenant?.shipping_mode || 'local';
+  const defaultFee = Number(tenant?.default_shipping_fee ?? 10.00);
+  const freeThreshold = Number(tenant?.free_shipping_threshold ?? 0.00);
+  const allowPickup = tenant?.enable_pickup ?? true;
 
   const selectedNeighborhood = neighborhoods.find(n => String(n.id) === String(selectedNeighId));
   const localShippingFee = selectedNeighborhood ? Number(selectedNeighborhood.fee) : defaultFee;
@@ -350,7 +346,6 @@ export default function EcommerceCliente() {
   const subtotal = cart.reduce((sum, item) => sum + (Number(item.price) * item.quantity), 0);
   const isFreeShipping = freeThreshold > 0 && subtotal >= freeThreshold;
 
-  // CÁLCULO DA TAXA DE FRETE ATIVA
   let activeShippingFee = 0;
   if (deliveryType === 'RETIRADA') {
     activeShippingFee = 0;
@@ -366,7 +361,6 @@ export default function EcommerceCliente() {
     }
   }
 
-  // CÁLCULO DE DESCONTO DO CUPOM
   let discountValue = 0;
   if (appliedCoupon) {
     if (appliedCoupon.discount_type === 'percent') {
@@ -379,7 +373,6 @@ export default function EcommerceCliente() {
 
   const total = Math.max(0, subtotal - discountValue + activeShippingFee);
 
-  // FILTRAGEM DE PRODUTOS
   const promoProductsCount = products.filter(p => p.original_price && Number(p.original_price) > Number(p.price)).length;
   
   const filteredProducts = selectedCat === 'ALL' 
@@ -389,8 +382,11 @@ export default function EcommerceCliente() {
         : products.filter(p => String(p.category_id) === String(selectedCat))
       );
 
-  const promoBannerList = tenant.promo_banners ? tenant.promo_banners.split(',').map(b => b.trim()).filter(Boolean) : [];
+  const promoBannerList = tenant?.promo_banners ? tenant.promo_banners.split(',').map(b => b.trim()).filter(Boolean) : [];
 
+  // ==========================================
+  // FUNÇÃO DE FINALIZAR O PEDIDO (CORRIGIDA)
+  // ==========================================
   const handleFinishOrder = async (e) => {
     e.preventDefault();
     if (cart.length === 0) return alert("Seu carrinho está vazio!");
@@ -454,12 +450,10 @@ export default function EcommerceCliente() {
       window.fbq('track', 'Purchase', { value: total, currency: 'BRL' });
     }
 
-    // VERIFICA SE O PIX DINÂMICO ESTÁ ATIVADO E CONFIGURADO NO ADMIN
     const isPixDynamic = paymentMethod === 'PIX' && tenant.pix_enabled && tenant.pix_access_token;
 
     if (isPixDynamic) {
       try {
-        // TENTA CHAMAR A ROTA INTERNA DA API PRIMEIRO PARA EVITAR CORS
         const mpRes = await fetch('/api/create-pix', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -487,42 +481,18 @@ export default function EcommerceCliente() {
           setIsSubmitting(false);
           return;
         } else {
-          // FALLBACK DIRETO CASO A ROTA INTERNA FIQUE INDISPONÍVEL
-          const directRes = await fetch('https://api.mercadopago.com/v1/payments', {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              'Authorization': `Bearer ${tenant.pix_access_token}`,
-              'X-Idempotency-Key': `order-${insertedOrder.id}-${Date.now()}`
-            },
-            body: JSON.stringify({
-              transaction_amount: Number(total.toFixed(2)),
-              description: `Pedido #${insertedOrder.id} - ${tenant.name}`,
-              payment_method_id: 'pix',
-              payer: {
-                email: `${customerPhone.replace(/\D/g, '') || 'cliente'}@sac.com`,
-                first_name: customerName,
-              }
-            })
-          });
-          const directData = await directRes.json();
-          if (directData && directData.point_of_interaction?.transaction_data) {
-            setPixQrCodeBase64(directData.point_of_interaction.transaction_data.qr_code_base64);
-            setPixCopyPaste(directData.point_of_interaction.transaction_data.qr_code);
-            setPixPaymentId(directData.id);
-            setPixStatus('pending');
-            setShowPixModal(true);
-            setShowCartModal(false);
-            setIsSubmitting(false);
-            return;
-          }
+          alert(`⚠️ Não foi possível gerar o PIX:\n${mpData.error || 'Verifique se o Access Token está correto no painel.'}`);
+          setIsSubmitting(false);
+          return;
         }
       } catch (err) {
-        console.error("Erro na API do Mercado Pago:", err);
+        console.error("Erro na rota interna do PIX:", err);
+        alert("Ocorreu um erro de conexão ao tentar gerar o PIX.");
+        setIsSubmitting(false);
+        return;
       }
     }
 
-    // SE NÃO FOR PIX DINÂMICO OU OCORRER FALHA, ENVIA PARA O WHATSAPP DIRETO
     sendWhatsAppNotification(insertedOrder, false);
 
     setIsSubmitting(false);
@@ -530,6 +500,9 @@ export default function EcommerceCliente() {
     setShowCartModal(false);
     alert("Pedido registrado e enviado para o WhatsApp com sucesso!");
   };
+
+  if (loading) return <div className="min-h-screen bg-gray-950 text-white flex items-center justify-center font-sans"><p className="text-xs text-gray-400">Carregando loja...</p></div>;
+  if (!tenant) return <div className="min-h-screen bg-gray-950 text-white flex items-center justify-center font-sans"><h1 className="text-xl font-bold text-orange-500">Loja não encontrada</h1></div>;
 
   const hasCustomVariations = selectedProduct?.variations_json && Array.isArray(selectedProduct.variations_json) && selectedProduct.variations_json.length > 0;
   const isFashionFallback = !hasCustomVariations && (tenant?.niche === 'fashion' || !tenant?.niche);
