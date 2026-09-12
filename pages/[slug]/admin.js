@@ -32,7 +32,7 @@ export default function AdminTenant() {
   const [shippingMode, setShippingMode] = useState('local'); // 'local', 'national', 'hybrid'
   const [originCep, setOriginCep] = useState('');
   const [melhorenvioToken, setMelhorenvioToken] = useState('');
-  const [defaultShippingFee, setDefaultShippingFee] = useState(10.00);
+  const [defaultShippingFee, setDefaultShippingFee] = useState(0.00);
   const [freeShippingThreshold, setFreeShippingThreshold] = useState(0.00);
   const [enablePickup, setEnablePickup] = useState(true);
 
@@ -50,7 +50,7 @@ export default function AdminTenant() {
     width_cm: '15',
     height_cm: '10',
     length_cm: '20',
-    stock: '' // Campo de estoque opcional
+    stock: ''
   });
   const [editingProduct, setEditingProduct] = useState(null);
   const [editingCategory, setEditingCategory] = useState(null);
@@ -84,7 +84,7 @@ export default function AdminTenant() {
       setShippingMode(tData.shipping_mode || 'local');
       setOriginCep(tData.origin_cep || '');
       setMelhorenvioToken(tData.melhorenvio_token || '');
-      setDefaultShippingFee(tData.default_shipping_fee ?? 10.00);
+      setDefaultShippingFee(tData.default_shipping_fee ?? 0.00);
       setFreeShippingThreshold(tData.free_shipping_threshold ?? 0.00);
       setEnablePickup(tData.enable_pickup ?? true);
     }
@@ -121,7 +121,7 @@ export default function AdminTenant() {
       setShippingMode(tData.shipping_mode || 'local');
       setOriginCep(tData.origin_cep || '');
       setMelhorenvioToken(tData.melhorenvio_token || '');
-      setDefaultShippingFee(tData.default_shipping_fee ?? 10.00);
+      setDefaultShippingFee(tData.default_shipping_fee ?? 0.00);
       setFreeShippingThreshold(tData.free_shipping_threshold ?? 0.00);
       setEnablePickup(tData.enable_pickup ?? true);
     }
@@ -153,7 +153,7 @@ export default function AdminTenant() {
       shipping_mode: shippingMode,
       origin_cep: originCep,
       melhorenvio_token: melhorenvioToken,
-      default_shipping_fee: parsePrice(defaultShippingFee, 10.00),
+      default_shipping_fee: parsePrice(defaultShippingFee, 0.00),
       free_shipping_threshold: parsePrice(freeShippingThreshold, 0.00),
       enable_pickup: enablePickup,
       pix_key: tenant.pix_key || '',
@@ -281,7 +281,6 @@ export default function AdminTenant() {
     const formattedOrigPrice = newProd.original_price ? parsePrice(newProd.original_price) : null;
     const mainImage = newProd.image || (newProd.images_json && newProd.images_json[0]) || 'https://images.unsplash.com/photo-1521572267360-ee0c2909d518?w=300&auto=format&fit=crop&q=80';
 
-    // LÓGICA DE ESTOQUE OPCIONAL (Se <= 0, desativa automaticamente)
     const stockVal = newProd.stock !== '' && newProd.stock !== null ? parseInt(newProd.stock) : null;
     const autoActive = stockVal !== null ? stockVal > 0 : true;
 
@@ -332,7 +331,6 @@ export default function AdminTenant() {
     const formattedOrigPrice = editingProduct.original_price ? parsePrice(editingProduct.original_price) : null;
     const mainImage = editingProduct.image || (editingProduct.images_json && editingProduct.images_json[0]) || '';
 
-    // LÓGICA DE ESTOQUE NA EDIÇÃO
     const stockVal = editingProduct.stock !== '' && editingProduct.stock !== null ? parseInt(editingProduct.stock) : null;
     const autoActive = stockVal !== null ? stockVal > 0 : editingProduct.active;
 
@@ -414,7 +412,6 @@ export default function AdminTenant() {
     fetchData();
   };
 
-  // CÁLCULO DE VENDAS E FILTROS DO RELATÓRIO
   const getFilteredOrders = () => {
     const now = new Date();
     return allOrders.filter(o => {
@@ -453,7 +450,6 @@ export default function AdminTenant() {
     .map(([name, qty]) => ({ name, qty }))
     .sort((a, b) => b.qty - a.qty);
 
-  // AGRUPAMENTO DE CLIENTES PARA O CRM DE VENDAS
   const getCustomersList = () => {
     const customerMap = {};
 
@@ -619,7 +615,6 @@ export default function AdminTenant() {
                 </div>
               </div>
 
-              {/* PESO E DIMENSÕES PARA FRETE NACIONAL */}
               <div className="bg-gray-950 p-3.5 rounded-2xl border border-gray-800 space-y-2">
                 <label className="text-xs font-bold text-orange-400 block">📦 Peso e Dimensões da Caixa/Embalagem (Para Frete Nacional por CEP)</label>
                 <div className="grid grid-cols-4 gap-2 text-xs">
@@ -816,7 +811,7 @@ export default function AdminTenant() {
         </div>
       )}
 
-      {/* FRETE & CEP DE ORIGEM (SESSÃO ÚNICA DE FRETE COM MODO DE OPERAÇÃO UNIFICADO) */}
+      {/* FRETE & CEP DE ORIGEM (PAINEL LIMPO E UNIFICADO) */}
       {activeTab === 'neighborhoods' && (
         <div className="space-y-6">
           <section className="bg-gray-900 p-5 rounded-3xl border border-orange-500/30 space-y-4 shadow-xl">
@@ -831,14 +826,14 @@ export default function AdminTenant() {
                   value={shippingMode}
                   onChange={(e) => setShippingMode(e.target.value)}
                   className="w-full bg-gray-950 border border-gray-800 p-3 rounded-xl text-xs text-white focus:outline-none font-bold">
-                  <option value="local">🛵 Apenas Local (Taxa Fixa / Bairros / Retirada na Loja)</option>
+                  <option value="local">🛵 Apenas Local (Por Bairros da Cidade / Retirada)</option>
                   <option value="national">📦 Apenas Nacional (Cálculo via CEP / Correios / Transportadoras)</option>
-                  <option value="hybrid">⚡ Híbrido (Motoboy na Cidade + Correios para o Brasil)</option>
+                  <option value="hybrid">⚡ Híbrido (Motoboy por Bairro na Cidade + Correios por CEP para o Brasil)</option>
                 </select>
                 <p className="text-[10px] text-gray-400 mt-1">
-                  {shippingMode === 'local' && 'Ideal para negócios locais (lojas de bairro, restaurantes).'}
-                  {shippingMode === 'national' && 'Ideal para marcas de alcance nacional (vestuário, cosméticos, eletrônicos).'}
-                  {shippingMode === 'hybrid' && 'Combina entrega rápida por motoboy na sua cidade com envio via Correios para todo o Brasil.'}
+                  {shippingMode === 'local' && 'Ideal para negócios locais com taxa definida por bairro.'}
+                  {shippingMode === 'national' && 'Ideal para vendas nacionais com frete calculado por CEP.'}
+                  {shippingMode === 'hybrid' && 'Permite ao cliente escolher entre Entrega por Bairro na cidade ou Correios via CEP.'}
                 </p>
               </div>
 
@@ -865,30 +860,18 @@ export default function AdminTenant() {
                       onChange={(e) => setMelhorenvioToken(e.target.value)}
                       className="w-full bg-gray-900 border border-gray-800 p-2.5 rounded-xl text-xs text-white focus:outline-none font-mono"
                     />
-                    <span className="text-[9px] text-gray-500 block mt-0.5">Se deixado em branco, a plataforma utilizará a integração padrão.</span>
                   </div>
                 </div>
               )}
 
               {(shippingMode === 'local' || shippingMode === 'hybrid') && (
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-3 bg-gray-950 p-3.5 rounded-2xl border border-gray-800">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3 bg-gray-950 p-3.5 rounded-2xl border border-gray-800">
                   <div className="col-span-full">
-                    <h4 className="font-bold text-xs text-blue-400">🛵 Parâmetros para Entregas Locais</h4>
-                  </div>
-                  <div>
-                    <label className="text-xs text-gray-400 block mb-1">Taxa Fixa Local (R$):</label>
-                    <input
-                      type="number"
-                      step="0.01"
-                      value={defaultShippingFee}
-                      onChange={(e) => setDefaultShippingFee(e.target.value)}
-                      className="w-full bg-gray-900 border border-gray-800 p-2.5 rounded-xl text-xs text-white focus:outline-none"
-                      placeholder="10.00"
-                    />
+                    <h4 className="font-bold text-xs text-blue-400">⚙️ Regras Gerais de Entrega Local</h4>
                   </div>
 
                   <div>
-                    <label className="text-xs text-gray-400 block mb-1">Valor p/ Frete Grátis (R$):</label>
+                    <label className="text-xs text-gray-400 block mb-1">Valor Mínimo p/ Frete Grátis (R$):</label>
                     <input
                       type="number"
                       step="0.01"
@@ -901,11 +884,11 @@ export default function AdminTenant() {
                   </div>
 
                   <div>
-                    <label className="text-xs text-gray-400 block mb-1">Permitir Retirada?</label>
+                    <label className="text-xs text-gray-400 block mb-1">Permitir Retirada no Balcão / Loja?</label>
                     <select
                       value={enablePickup ? 'SIM' : 'NAO'}
                       onChange={(e) => setEnablePickup(e.target.value === 'SIM')}
-                      className="w-full bg-gray-900 border border-gray-800 p-2.5 rounded-xl text-xs text-white focus:outline-none">
+                      className="w-full bg-gray-900 border border-gray-800 p-2.5 rounded-xl text-xs text-white focus:outline-none font-bold">
                       <option value="SIM">Sim (Cliente pode retirar)</option>
                       <option value="NAO">Não (Apenas Entrega)</option>
                     </select>
@@ -925,10 +908,10 @@ export default function AdminTenant() {
           {(shippingMode === 'local' || shippingMode === 'hybrid') && (
             <>
               <section className="bg-gray-900 p-5 rounded-3xl border border-gray-800 space-y-4 shadow-xl">
-                <h3 className="font-bold text-sm text-blue-400">🛵 Cadastrar Bairros ou Regiões Locais (Manual)</h3>
+                <h3 className="font-bold text-sm text-blue-400">🛵 Cadastrar Bairros ou Regiões Locais</h3>
                 <form onSubmit={handleAddNeighborhood} className="space-y-3">
-                  <input type="text" placeholder="Nome (Ex: Centro, Bairro São João, Zona Norte)" value={newNeigh.name} className="w-full bg-gray-950 border border-gray-800 p-3 rounded-xl text-xs text-white focus:outline-none" onChange={(e) => setNewNeigh({ ...newNeigh, name: e.target.value })} />
-                  <input type="text" placeholder="Taxa de Envio R$ Ex: 15.00" value={newNeigh.fee} className="w-full bg-gray-950 border border-gray-800 p-3 rounded-xl text-xs text-white focus:outline-none" onChange={(e) => setNewNeigh({ ...newNeigh, fee: e.target.value })} />
+                  <input type="text" placeholder="Nome (Ex: Centro, Bairro São João, Cidade Nova)" value={newNeigh.name} className="w-full bg-gray-950 border border-gray-800 p-3 rounded-xl text-xs text-white focus:outline-none" onChange={(e) => setNewNeigh({ ...newNeigh, name: e.target.value })} />
+                  <input type="text" placeholder="Taxa de Envio R$ Ex: 5.00" value={newNeigh.fee} className="w-full bg-gray-950 border border-gray-800 p-3 rounded-xl text-xs text-white focus:outline-none" onChange={(e) => setNewNeigh({ ...newNeigh, fee: e.target.value })} />
                   <button type="submit" className="w-full bg-green-600 hover:bg-green-700 font-bold py-3 rounded-xl text-xs text-white transition">Cadastrar Bairro / Região</button>
                 </form>
               </section>
@@ -1013,7 +996,7 @@ export default function AdminTenant() {
         </div>
       )}
 
-      {/* RELATÓRIOS & GESTÃO FINANCEIRA (COM IMPRESSÃO E TABELA DETALHADA) */}
+      {/* RELATÓRIOS & GESTÃO FINANCEIRA */}
       {activeTab === 'reports' && (
         <div className="space-y-4">
           <div className="flex justify-between items-center bg-gray-900 p-4 rounded-2xl border border-gray-800 text-xs print:hidden">
@@ -1066,7 +1049,6 @@ export default function AdminTenant() {
             </div>
           </section>
 
-          {/* TABELA DETALHADA DE VENDAS */}
           <section className="bg-gray-900 p-5 rounded-3xl border border-gray-800 space-y-3 shadow-xl">
             <h3 className="font-bold text-xs text-blue-400 uppercase tracking-wider">📜 HISTÓRICO DETALHADO DE PEDIDOS</h3>
             <div className="overflow-x-auto">
@@ -1193,8 +1175,8 @@ export default function AdminTenant() {
               </div>
 
               <div>
-                <label className="text-[11px] text-orange-400 font-bold block mb-1">📢 Mensagem / Aviso no Pedido e Topo da Loja:</label>
-                <input type="text" placeholder="Ex: Prazo de confecção de 3 dias úteis após aprovação." value={tenant.custom_message || ''} className="w-full bg-gray-950 border border-orange-500/30 p-3 rounded-xl text-xs text-white focus:outline-none" onChange={(e) => setTenant({ ...tenant, custom_message: e.target.value })} />
+                <label className="text-[11px] text-orange-400 font-bold block mb-1">📢 Barra de Aviso / Comunicado no Topo da Loja:</label>
+                <input type="text" placeholder="Ex: 📦 Prazo de confecção: 5 dias úteis | ⚡ Frete Grátis acima de R$ 150" value={tenant.custom_message || ''} className="w-full bg-gray-950 border border-orange-500/30 p-3 rounded-xl text-xs text-white focus:outline-none" onChange={(e) => setTenant({ ...tenant, custom_message: e.target.value })} />
               </div>
 
               <div>
@@ -1285,7 +1267,7 @@ export default function AdminTenant() {
         </div>
       )}
 
-      {/* MODAIS DE EDIÇÃO MANTIDOS INTACTOS */}
+      {/* MODAIS DE EDIÇÃO MANTIDOS */}
       {editingNeigh && (
         <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 p-4">
           <form onSubmit={handleUpdateNeigh} className="bg-gray-900 w-full max-w-sm rounded-3xl p-5 border border-blue-500/40 space-y-3 shadow-2xl">
