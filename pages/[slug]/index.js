@@ -459,48 +459,66 @@ export default function EcommerceCliente() {
 
     if (isPixDynamic) {
       try {
-        const mpPayload = {
-          transaction_amount: Number(total.toFixed(2)),
-          description: `Pedido #${insertedOrder.id} - ${tenant.name}`,
-          payment_method_id: 'pix',
-          payer: {
-            email: `${customerPhone.replace(/\D/g, '') || 'cliente'}@sac.com`,
-            first_name: customerName,
-          }
-        };
-
-        const mpRes = await fetch('https://api.mercadopago.com/v1/payments', {
+        // TENTA CHAMAR A ROTA INTERNA DA API PRIMEIRO PARA EVITAR CORS
+        const mpRes = await fetch('/api/create-pix', {
           method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${tenant.pix_access_token}`,
-            'X-Idempotency-Key': `order-${insertedOrder.id}-${Date.now()}`
-          },
-          body: JSON.stringify(mpPayload)
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            amount: Number(total.toFixed(2)),
+            description: `Pedido #${insertedOrder.id} - ${tenant.name}`,
+            accessToken: tenant.pix_access_token,
+            orderId: insertedOrder.id,
+            payer: {
+              email: `${customerPhone.replace(/\D/g, '') || 'cliente'}@sac.com`,
+              name: customerName
+            }
+          })
         });
 
         const mpData = await mpRes.json();
 
-        if (mpData && mpData.point_of_interaction?.transaction_data) {
-          const qrCodeBase64 = mpData.point_of_interaction.transaction_data.qr_code_base64;
-          const qrCode = mpData.point_of_interaction.transaction_data.qr_code;
-          const payId = mpData.id;
-
-          setPixQrCodeBase64(qrCodeBase64);
-          setPixCopyPaste(qrCode);
-          setPixPaymentId(payId);
+        if (mpRes.ok && mpData.qr_code_base64) {
+          setPixQrCodeBase64(mpData.qr_code_base64);
+          setPixCopyPaste(mpData.qr_code);
+          setPixPaymentId(mpData.id);
           setPixStatus('pending');
           setShowPixModal(true);
           setShowCartModal(false);
           setIsSubmitting(false);
           return;
         } else {
-          console.warn("Mercado Pago retornou resposta inválida:", mpData);
-          alert("⚠️ Não foi possível gerar o PIX Dinâmico automaticamente. Redirecionando para o WhatsApp...");
+          // FALLBACK DIRETO CASO A ROTA INTERNA FIQUE INDISPONÍVEL
+          const directRes = await fetch('https://api.mercadopago.com/v1/payments', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${tenant.pix_access_token}`,
+              'X-Idempotency-Key': `order-${insertedOrder.id}-${Date.now()}`
+            },
+            body: JSON.stringify({
+              transaction_amount: Number(total.toFixed(2)),
+              description: `Pedido #${insertedOrder.id} - ${tenant.name}`,
+              payment_method_id: 'pix',
+              payer: {
+                email: `${customerPhone.replace(/\D/g, '') || 'cliente'}@sac.com`,
+                first_name: customerName,
+              }
+            })
+          });
+          const directData = await directRes.json();
+          if (directData && directData.point_of_interaction?.transaction_data) {
+            setPixQrCodeBase64(directData.point_of_interaction.transaction_data.qr_code_base64);
+            setPixCopyPaste(directData.point_of_interaction.transaction_data.qr_code);
+            setPixPaymentId(directData.id);
+            setPixStatus('pending');
+            setShowPixModal(true);
+            setShowCartModal(false);
+            setIsSubmitting(false);
+            return;
+          }
         }
       } catch (err) {
         console.error("Erro na API do Mercado Pago:", err);
-        alert("⚠️ Erro na conexão com o PIX Dinâmico. Redirecionando para o WhatsApp...");
       }
     }
 
