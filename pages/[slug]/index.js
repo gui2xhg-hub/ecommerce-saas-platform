@@ -34,6 +34,16 @@ export default function EcommerceCliente() {
   const [paymentMethod, setPaymentMethod] = useState('PIX');
   const [isSubmitting, setIsSubmitting] = useState(false);
 
+  // ESTADOS DO PIX DINÂMICO
+  const [showPixModal, setShowPixModal] = useState(false);
+  const [pixQrCodeBase64, setPixQrCodeBase64] = useState('');
+  const [pixCopyPaste, setPixCopyPaste] = useState('');
+  const [pixPaymentId, setPixPaymentId] = useState(null);
+  const [pixStatus, setPixStatus] = useState('pending'); // 'pending', 'approved', 'error'
+  const [pixCopySuccess, setPixCopySuccess] = useState(false);
+  const [currentOrderId, setCurrentOrderId] = useState(null);
+  const [currentOrderPayload, setCurrentOrderPayload] = useState(null);
+
   // CÁLCULO DE FRETE POR CEP (NACIONAL / HÍBRIDO)
   const [destinationCep, setDestinationCep] = useState('');
   const [isCalculatingCep, setIsCalculatingCep] = useState(false);
@@ -51,6 +61,35 @@ export default function EcommerceCliente() {
       fetchTenantData();
     }
   }, [router.isReady, slug]);
+
+  // MONITORAMENTO E CHECAGEM EM TEMPO REAL DO PIX DINÂMICO (POLLING A CADA 3.5s)
+  useEffect(() => {
+    let interval = null;
+    if (showPixModal && pixPaymentId && tenant?.pix_access_token && pixStatus !== 'approved') {
+      interval = setInterval(async () => {
+        try {
+          const res = await fetch(`https://api.mercadopago.com/v1/payments/${pixPaymentId}`, {
+            headers: {
+              'Authorization': `Bearer ${tenant.pix_access_token}`
+            }
+          });
+          const data = await res.json();
+          if (data && data.status === 'approved') {
+            setPixStatus('approved');
+            if (currentOrderId) {
+              await supabase.from('orders').update({ is_paid: true }).eq('id', currentOrderId);
+            }
+            clearInterval(interval);
+          }
+        } catch (e) {
+          console.error("Erro ao consultar status do PIX:", e);
+        }
+      }, 3500);
+    }
+    return () => {
+      if (interval) clearInterval(interval);
+    };
+  }, [showPixModal, pixPaymentId, pixStatus, tenant, currentOrderId]);
 
   const fetchTenantData = async () => {
     setLoading(true);
@@ -218,7 +257,7 @@ export default function EcommerceCliente() {
       setCepError('Erro ao consultar o CEP. Tente novamente.');
       setCalculatedOptions([]);
       setSelectedShippingOption(null);
-    } font-sans finally {
+    } finally {
       setIsCalculatingCep(false);
     }
   };
@@ -245,6 +284,52 @@ export default function EcommerceCliente() {
     }
   };
 
+  const copyPixCode = () => {
+    if (!pixCopyPaste) return;
+    navigator.clipboard.writeText(pixCopyPaste);
+    setPixCopySuccess(true);
+    setTimeout(() => setPixCopySuccess(false), 3000);
+  };
+
+  const sendWhatsAppNotification = (orderObj, isPaidConfirmed = false) => {
+    let orderTag = orderObj?.id ? ` #${orderObj.id}` : '';
+    let itemsText = cart.map(i => {
+      let varStr = i.variationsText ? ` [${i.variationsText}]` : '';
+      let txt = `• ${i.quantity}x ${i.name}${varStr} (R$ ${(Number(i.price) * i.quantity).toFixed(2)})`;
+      if (i.note) txt += `\n   Obs: _"${i.note}"_`;
+      return txt;
+    }).join('\n\n');
+
+    let msg = `*NOVA COMPRA NA LOJA${orderTag} - ${tenant.name.toUpperCase()}*\n\n`;
+    msg += `*Cliente:* ${customerName}\n*Telefone:* ${customerPhone}\n`;
+    msg += `*Tipo de Envio:* ${deliveryType === 'ENTREGA' ? `Entrega em: ${customerAddress} (${currentOrderPayload?.shippingLabel || ''})` : 'Retirar na Loja'}\n`;
+    if (destinationCep) msg += `*CEP:* ${destinationCep}\n`;
+    msg += `\n*ITENS COMPRADOS:*\n${itemsText}\n\n`;
+    msg += `*Subtotal:* R$ ${subtotal.toFixed(2)}\n`;
+    if (discountValue > 0) {
+      msg += `*Desconto (${appliedCoupon?.code}):* -R$ ${discountValue.toFixed(2)}\n`;
+    }
+    msg += `*Frete/Envio:* ${activeShippingFee === 0 ? (deliveryType === 'RETIRADA' ? 'Grátis (Retirada)' : 'FRETE GRÁTIS 🎉') : `R$ ${activeShippingFee.toFixed(2)}`}\n`;
+    msg += `*TOTAL:* *R$ ${total.toFixed(2)}*\n`;
+    
+    if (isPaidConfirmed) {
+      msg += `*Forma de Pagamento:* 🟢 PIX (PAGO E CONFIRMADO AUTOMATICAMENTE)`;
+    } else if (paymentMethod === 'PIX') {
+      msg += `*Forma de Pagamento:* 🟡 PIX Dinâmico (Aguardando Confirmação)`;
+    } else {
+      msg += `*Forma de Pagamento:* ${paymentMethod}`;
+    }
+
+    if (tenant.custom_message) {
+      msg += `\n\n📌 _${tenant.custom_message}_`;
+    }
+
+    const cleanWhatsapp = tenant.whatsapp ? tenant.whatsapp.replace(/\D/g, '') : '';
+    if (cleanWhatsapp) {
+      window.open(`https://wa.me/${cleanWhatsapp}?text=${encodeURIComponent(msg)}`, '_blank');
+    }
+  };
+
   if (loading) return <div className="min-h-screen bg-gray-950 text-white flex items-center justify-center font-sans"><p className="text-xs text-gray-400">Carregando loja...</p></div>;
   if (!tenant) return <div className="min-h-screen bg-gray-950 text-white flex items-center justify-center font-sans"><h1 className="text-xl font-bold text-orange-500">Loja não encontrada</h1></div>;
 
@@ -254,7 +339,7 @@ export default function EcommerceCliente() {
   const cardColor = tenant.card_color || '#111827';
   const textColor = tenant.text_color || '#FFFFFF';
 
-  const shippingMode = tenant.shipping_mode || 'local'; // 'local', 'national', 'hybrid'
+  const shippingMode = tenant.shipping_mode || 'local';
   const defaultFee = Number(tenant.default_shipping_fee ?? 10.00);
   const freeThreshold = Number(tenant.free_shipping_threshold ?? 0.00);
   const allowPickup = tenant.enable_pickup ?? true;
@@ -346,7 +431,8 @@ export default function EcommerceCliente() {
       delivery_fee: Number(activeShippingFee.toFixed(2)),
       total: Number(total.toFixed(2)),
       payment_method: paymentMethod,
-      status: 'recebido'
+      status: 'recebido',
+      is_paid: false
     };
 
     const { data: insertedOrder, error: insertErr } = await supabase
@@ -361,39 +447,65 @@ export default function EcommerceCliente() {
       return;
     }
 
+    setCurrentOrderId(insertedOrder.id);
+    setCurrentOrderPayload({ ...orderPayload, shippingLabel });
+
     if (window.fbq) {
       window.fbq('track', 'Purchase', { value: total, currency: 'BRL' });
     }
 
-    let orderTag = insertedOrder?.id ? ` #${insertedOrder.id}` : '';
-    let itemsText = cart.map(i => {
-      let varStr = i.variationsText ? ` [${i.variationsText}]` : '';
-      let txt = `• ${i.quantity}x ${i.name}${varStr} (R$ ${(Number(i.price) * i.quantity).toFixed(2)})`;
-      if (i.note) txt += `\n   Obs: _"${i.note}"_`;
-      return txt;
-    }).join('\n\n');
+    // VERIFICA SE O PIX DINÂMICO ESTÁ ATIVADO E CONFIGURADO NO ADMIN
+    const isPixDynamic = paymentMethod === 'PIX' && tenant.pix_enabled && tenant.pix_access_token;
 
-    let msg = `*NOVA COMPRA NA LOJA${orderTag} - ${tenant.name.toUpperCase()}*\n\n`;
-    msg += `*Cliente:* ${customerName}\n*Telefone:* ${customerPhone}\n`;
-    msg += `*Tipo de Envio:* ${deliveryType === 'ENTREGA' ? `Entrega em: ${customerAddress} (${shippingLabel})` : 'Retirar na Loja'}\n`;
-    if (destinationCep) msg += `*CEP:* ${destinationCep}\n`;
-    msg += `\n*ITENS COMPRADOS:*\n${itemsText}\n\n`;
-    msg += `*Subtotal:* R$ ${subtotal.toFixed(2)}\n`;
-    if (discountValue > 0) {
-      msg += `*Desconto (${appliedCoupon?.code}):* -R$ ${discountValue.toFixed(2)}\n`;
-    }
-    msg += `*Frete/Envio:* ${activeShippingFee === 0 ? (deliveryType === 'RETIRADA' ? 'Grátis (Retirada)' : 'FRETE GRÁTIS 🎉') : `R$ ${activeShippingFee.toFixed(2)}`}\n`;
-    msg += `*TOTAL:* *R$ ${total.toFixed(2)}*\n`;
-    msg += `*Forma de Pagamento:* ${paymentMethod}`;
+    if (isPixDynamic) {
+      try {
+        const mpPayload = {
+          transaction_amount: Number(total.toFixed(2)),
+          description: `Pedido #${insertedOrder.id} - ${tenant.name}`,
+          payment_method_id: 'pix',
+          payer: {
+            email: `${customerPhone.replace(/\D/g, '') || 'cliente'}@sac.com`,
+            first_name: customerName,
+          }
+        };
 
-    if (tenant.custom_message) {
-      msg += `\n\n📌 _${tenant.custom_message}_`;
+        const mpRes = await fetch('https://api.mercadopago.com/v1/payments', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${tenant.pix_access_token}`,
+            'X-Idempotency-Key': `order-${insertedOrder.id}-${Date.now()}`
+          },
+          body: JSON.stringify(mpPayload)
+        });
+
+        const mpData = await mpRes.json();
+
+        if (mpData && mpData.point_of_interaction?.transaction_data) {
+          const qrCodeBase64 = mpData.point_of_interaction.transaction_data.qr_code_base64;
+          const qrCode = mpData.point_of_interaction.transaction_data.qr_code;
+          const payId = mpData.id;
+
+          setPixQrCodeBase64(qrCodeBase64);
+          setPixCopyPaste(qrCode);
+          setPixPaymentId(payId);
+          setPixStatus('pending');
+          setShowPixModal(true);
+          setShowCartModal(false);
+          setIsSubmitting(false);
+          return;
+        } else {
+          console.warn("Mercado Pago retornou resposta inválida:", mpData);
+          alert("⚠️ Não foi possível gerar o PIX Dinâmico automaticamente. Redirecionando para o WhatsApp...");
+        }
+      } catch (err) {
+        console.error("Erro na API do Mercado Pago:", err);
+        alert("⚠️ Erro na conexão com o PIX Dinâmico. Redirecionando para o WhatsApp...");
+      }
     }
 
-    const cleanWhatsapp = tenant.whatsapp ? tenant.whatsapp.replace(/\D/g, '') : '';
-    if (cleanWhatsapp) {
-      window.open(`https://wa.me/${cleanWhatsapp}?text=${encodeURIComponent(msg)}`, '_blank');
-    }
+    // SE NÃO FOR PIX DINÂMICO OU OCORRER FALHA, ENVIA PARA O WHATSAPP DIRETO
+    sendWhatsAppNotification(insertedOrder, false);
 
     setIsSubmitting(false);
     setCart([]);
@@ -802,7 +914,6 @@ export default function EcommerceCliente() {
                             if (cleanVal.length === 8) {
                               handleCalculateCep(val);
                             } else {
-                              // LIMPA AS OPÇÕES SE O CEP FOR APAGADO OU ESTIVER INCOMPLETO
                               setCalculatedOptions([]);
                               setSelectedShippingOption(null);
                               setCepError('');
@@ -930,9 +1041,86 @@ export default function EcommerceCliente() {
                 disabled={isSubmitting}
                 style={{ backgroundColor: primaryColor, color: btnTextColor }}
                 className="w-full font-bold py-3.5 rounded-xl text-xs shadow-lg transition hover:opacity-90">
-                {isSubmitting ? 'Enviando...' : 'Finalizar Pedido no WhatsApp 🚀'}
+                {isSubmitting ? 'Gerando Pagamento...' : 'Finalizar Pedido 🚀'}
               </button>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL DE PAGAMENTO PIX DINÂMICO COM TELA DE QR CODE E POLLING */}
+      {showPixModal && (
+        <div className="fixed inset-0 bg-black/90 flex items-center justify-center z-50 p-4">
+          <div style={{ backgroundColor: cardColor, color: textColor }} className="border border-green-500/40 w-full max-w-sm rounded-3xl p-6 space-y-4 shadow-2xl text-center relative overflow-hidden">
+            
+            <div className="space-y-1">
+              <span className="text-2xl block">⚡</span>
+              <h3 className="font-extrabold text-base text-green-400">Pagamento via PIX Dinâmico</h3>
+              <p className="text-[11px] opacity-70">Escaneie o QR Code ou copie a chave para pagar no app do seu banco.</p>
+            </div>
+
+            {/* STATUS DO PAGAMENTO */}
+            {pixStatus === 'approved' ? (
+              <div className="bg-green-500/20 border border-green-500/50 p-3 rounded-2xl space-y-1 animate-bounce">
+                <span className="text-xl">✅</span>
+                <p className="font-extrabold text-xs text-green-400">PAGAMENTO CONFIRMADO COM SUCESSO!</p>
+                <p className="text-[10px] text-gray-300">Seu pedido já foi baixado automaticamente no sistema.</p>
+              </div>
+            ) : (
+              <div className="bg-yellow-500/10 border border-yellow-500/30 p-2.5 rounded-2xl flex items-center justify-center space-x-2">
+                <span className="w-2.5 h-2.5 rounded-full bg-yellow-400 animate-ping"></span>
+                <span className="text-xs font-bold text-yellow-400">Aguardando pagamento no banco...</span>
+              </div>
+            )}
+
+            {/* QR CODE DA API DO MERCADO PAGO */}
+            {pixQrCodeBase64 && (
+              <div className="bg-white p-3 rounded-2xl inline-block shadow-lg mx-auto border border-gray-200">
+                <img 
+                  src={`data:image/jpeg;base64,${pixQrCodeBase64}`} 
+                  alt="QR Code PIX Mercado Pago" 
+                  className="w-44 h-44 object-contain mx-auto" 
+                />
+              </div>
+            )}
+
+            {/* VALOR E CHAVE COPIA E COLA */}
+            <div className="space-y-2">
+              <span className="text-xs text-gray-400 block font-bold">Valor Total: <b className="text-green-400 text-sm">R$ {total.toFixed(2)}</b></span>
+              
+              <button
+                type="button"
+                onClick={copyPixCode}
+                className={`w-full font-bold py-3 rounded-xl text-xs border transition flex items-center justify-center space-x-2 ${
+                  pixCopySuccess ? 'bg-green-600 text-white border-green-500' : 'bg-gray-800 text-white border-gray-700 hover:bg-gray-700'
+                }`}>
+                <span>{pixCopySuccess ? '✓ Chave Copiada!' : '📋 Copiar Chave PIX (Copia e Cola)'}</span>
+              </button>
+            </div>
+
+            {/* BOTOES DE AÇÃO */}
+            <div className="pt-2 border-t border-white/10 space-y-2">
+              <button
+                type="button"
+                onClick={() => {
+                  sendWhatsAppNotification({ id: currentOrderId }, pixStatus === 'approved');
+                  setShowPixModal(false);
+                  setCart([]);
+                }}
+                className="w-full bg-green-500 hover:bg-green-600 text-white font-extrabold py-3.5 rounded-xl text-xs transition shadow-lg flex items-center justify-center space-x-2">
+                <span>💬 Enviar Confirmação no WhatsApp</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  setShowPixModal(false);
+                  setCart([]);
+                }}
+                className="text-[11px] opacity-60 hover:opacity-100 font-bold block mx-auto pt-1">
+                Fechar Janela
+              </button>
+            </div>
           </div>
         </div>
       )}
