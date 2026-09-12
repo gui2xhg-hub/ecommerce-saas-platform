@@ -2,6 +2,14 @@ import React, { useState, useEffect } from 'react';
 import { useRouter } from 'next/router';
 import { supabase } from '../../lib/supabase';
 
+// FUNÇÃO AUXILIAR PARA PARSE SEGURO DE VALORES MONETÁRIOS
+const parsePrice = (val, defaultVal = 0) => {
+  if (!val && val !== 0) return defaultVal;
+  const clean = String(val).replace(',', '.');
+  const num = parseFloat(clean);
+  return isNaN(num) ? defaultVal : num;
+};
+
 export default function AdminTenant() {
   const router = useRouter();
   const { slug } = router.query;
@@ -132,6 +140,7 @@ export default function AdminTenant() {
       whatsapp: cleanWhatsapp,
       logo_url: tenant.logo_url || '',
       banner_url: tenant.banner_url || '',
+      promo_banners: tenant.promo_banners || '',
       instagram_url: tenant.instagram_url || '',
       primary_color: tenant.primary_color || '#3B82F6',
       secondary_color: tenant.secondary_color || '#090D16',
@@ -140,20 +149,18 @@ export default function AdminTenant() {
       shipping_mode: shippingMode,
       origin_cep: originCep,
       melhorenvio_token: melhorenvioToken,
-      default_shipping_fee: Number(defaultShippingFee),
-      free_shipping_threshold: Number(freeShippingThreshold),
-      enable_pickup: enablePickup
+      default_shipping_fee: parsePrice(defaultShippingFee, 10.00),
+      free_shipping_threshold: parsePrice(freeShippingThreshold, 0.00),
+      enable_pickup: enablePickup,
+      pix_key: tenant.pix_key || '',
+      opening_time: tenant.opening_time || '08:00',
+      closing_time: tenant.closing_time || '18:00',
+      pixel_id: tenant.pixel_id || '',
+      custom_message: tenant.custom_message || '',
+      pix_enabled: tenant.pix_enabled || false,
+      pix_provider: tenant.pix_provider || 'mercadopago',
+      pix_access_token: tenant.pix_access_token || ''
     };
-
-    if ('pix_key' in tenant) updatePayload.pix_key = tenant.pix_key || '';
-    if ('promo_banners' in tenant) updatePayload.promo_banners = tenant.promo_banners || '';
-    if ('opening_time' in tenant) updatePayload.opening_time = tenant.opening_time || '08:00';
-    if ('closing_time' in tenant) updatePayload.closing_time = tenant.closing_time || '18:00';
-    if ('pixel_id' in tenant) updatePayload.pixel_id = tenant.pixel_id || '';
-    if ('custom_message' in tenant) updatePayload.custom_message = tenant.custom_message || '';
-    if ('pix_enabled' in tenant) updatePayload.pix_enabled = tenant.pix_enabled || false;
-    if ('pix_provider' in tenant) updatePayload.pix_provider = tenant.pix_provider || 'mercadopago';
-    if ('pix_access_token' in tenant) updatePayload.pix_access_token = tenant.pix_access_token || '';
 
     const { error } = await supabase.from('tenants').update(updatePayload).eq('id', tenant.id);
 
@@ -266,8 +273,8 @@ export default function AdminTenant() {
       return alert("Selecione uma categoria válida antes de salvar!");
     }
 
-    const formattedPrice = parseFloat(String(newProd.price).replace(',', '.'));
-    const formattedOrigPrice = newProd.original_price ? parseFloat(String(newProd.original_price).replace(',', '.')) : null;
+    const formattedPrice = parsePrice(newProd.price);
+    const formattedOrigPrice = newProd.original_price ? parsePrice(newProd.original_price) : null;
     const mainImage = newProd.image || (newProd.images_json && newProd.images_json[0]) || 'https://images.unsplash.com/photo-1521572267360-ee0c2909d518?w=300&auto=format&fit=crop&q=80';
 
     const { error } = await supabase.from('products').insert([{
@@ -280,10 +287,10 @@ export default function AdminTenant() {
       image: mainImage,
       images_json: newProd.images_json || [mainImage],
       variations_json: newProd.variations_json || [],
-      weight_kg: parseFloat(String(newProd.weight_kg || '0.3').replace(',', '.')),
-      width_cm: parseFloat(String(newProd.width_cm || '15').replace(',', '.')),
-      height_cm: parseFloat(String(newProd.height_cm || '10').replace(',', '.')),
-      length_cm: parseFloat(String(newProd.length_cm || '20').replace(',', '.')),
+      weight_kg: parsePrice(newProd.weight_kg, 0.3),
+      width_cm: parsePrice(newProd.width_cm, 15),
+      height_cm: parsePrice(newProd.height_cm, 10),
+      length_cm: parsePrice(newProd.length_cm, 20),
       active: true
     }]);
 
@@ -311,8 +318,8 @@ export default function AdminTenant() {
 
   const handleUpdateProduct = async (e) => {
     e.preventDefault();
-    const formattedPrice = parseFloat(String(editingProduct.price).replace(',', '.'));
-    const formattedOrigPrice = editingProduct.original_price ? parseFloat(String(editingProduct.original_price).replace(',', '.')) : null;
+    const formattedPrice = parsePrice(editingProduct.price);
+    const formattedOrigPrice = editingProduct.original_price ? parsePrice(editingProduct.original_price) : null;
     const mainImage = editingProduct.image || (editingProduct.images_json && editingProduct.images_json[0]) || '';
 
     const { error } = await supabase.from('products').update({
@@ -324,10 +331,10 @@ export default function AdminTenant() {
       image: mainImage,
       images_json: editingProduct.images_json || [mainImage],
       variations_json: editingProduct.variations_json || [],
-      weight_kg: parseFloat(String(editingProduct.weight_kg || '0.3').replace(',', '.')),
-      width_cm: parseFloat(String(editingProduct.width_cm || '15').replace(',', '.')),
-      height_cm: parseFloat(String(editingProduct.height_cm || '10').replace(',', '.')),
-      length_cm: parseFloat(String(editingProduct.length_cm || '20').replace(',', '.'))
+      weight_kg: parsePrice(editingProduct.weight_kg, 0.3),
+      width_cm: parsePrice(editingProduct.width_cm, 15),
+      height_cm: parsePrice(editingProduct.height_cm, 10),
+      length_cm: parsePrice(editingProduct.length_cm, 20)
     }).eq('id', editingProduct.id);
 
     if (error) {
@@ -342,7 +349,7 @@ export default function AdminTenant() {
     e.preventDefault();
     if (!newCoupon.code || !newCoupon.discount_value) return alert("Preencha o código e o valor do desconto!");
     const cleanCode = newCoupon.code.trim().toUpperCase();
-    const formattedVal = parseFloat(String(newCoupon.discount_value).replace(',', '.'));
+    const formattedVal = parsePrice(newCoupon.discount_value);
 
     const { error } = await supabase.from('coupons').insert([{
       tenant_id: tenant.id,
@@ -362,7 +369,7 @@ export default function AdminTenant() {
 
   const handleAddNeighborhood = async (e) => {
     e.preventDefault();
-    const formattedFee = parseFloat(String(newNeigh.fee).replace(',', '.'));
+    const formattedFee = parsePrice(newNeigh.fee);
     await supabase.from('neighborhoods').insert([{ tenant_id: tenant.id, name: newNeigh.name.trim(), fee: formattedFee }]);
     setNewNeigh({ name: '', fee: '' });
     fetchData();
@@ -370,7 +377,7 @@ export default function AdminTenant() {
 
   const handleUpdateNeigh = async (e) => {
     e.preventDefault();
-    const formattedFee = parseFloat(String(editingNeigh.fee).replace(',', '.'));
+    const formattedFee = parsePrice(editingNeigh.fee);
     await supabase.from('neighborhoods').update({ name: editingNeigh.name.trim(), fee: formattedFee }).eq('id', editingNeigh.id);
     setEditingNeigh(null);
     fetchData();
@@ -396,7 +403,7 @@ export default function AdminTenant() {
     return allOrders.filter(o => {
       if (o.status === 'cancelado') return false;
       
-      const isPaid = o.payment_method && o.payment_method.includes('PAGO');
+      const isPaid = o.is_paid || (o.payment_method && o.payment_method.includes('PAGO'));
       if (!isPaid) return false;
 
       if (reportFilter === 'all') return true;
@@ -1021,6 +1028,17 @@ export default function AdminTenant() {
               <div>
                 <label className="text-[11px] text-gray-400 block mb-1">URL do Banner (Capa):</label>
                 <input type="text" value={tenant.banner_url || ''} className="w-full bg-gray-950 border border-gray-800 p-3 rounded-xl text-xs text-white focus:outline-none" onChange={(e) => setTenant({ ...tenant, banner_url: e.target.value })} />
+              </div>
+
+              <div>
+                <label className="text-[11px] text-gray-400 block mb-1">URLs dos Banners Promocionais da Vitrine (Separados por vírgula):</label>
+                <input 
+                  type="text" 
+                  placeholder="Ex: https://link1.com/banner1.jpg, https://link2.com/banner2.jpg" 
+                  value={tenant.promo_banners || ''} 
+                  className="w-full bg-gray-950 border border-gray-800 p-3 rounded-xl text-xs text-white focus:outline-none" 
+                  onChange={(e) => setTenant({ ...tenant, promo_banners: e.target.value })} 
+                />
               </div>
 
               <div className="grid grid-cols-2 gap-2">
