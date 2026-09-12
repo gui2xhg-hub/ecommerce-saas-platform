@@ -44,6 +44,11 @@ export default function EcommerceCliente() {
   const [currentOrderId, setCurrentOrderId] = useState(null);
   const [currentOrderPayload, setCurrentOrderPayload] = useState(null);
 
+  // ESTADOS DO MEUS PEDIDOS (RASTREAMENTO DO CLIENTE)
+  const [showMyOrdersModal, setShowMyOrdersModal] = useState(false);
+  const [myOrdersList, setMyOrdersList] = useState([]);
+  const [loadingMyOrders, setLoadingMyOrders] = useState(false);
+
   // CÁLCULO DE FRETE POR CEP (NACIONAL / HÍBRIDO)
   const [destinationCep, setDestinationCep] = useState('');
   const [isCalculatingCep, setIsCalculatingCep] = useState(false);
@@ -112,7 +117,7 @@ export default function EcommerceCliente() {
         !(function (f, b, e, v, n, t, s) {
           if (f.fbq) return; n = f.fbq = function () { n.callMethod ? n.callMethod.apply(n, arguments) : n.queue.push(arguments); };
           if (!f._fbq) f._fbq = n; n.push = n; n.loaded = !0; n.version = '2.0';
-          n.queue = []; t = b.createElement(e); t.async = !0;
+          t = b.createElement(e); t.async = !0;
           t.src = v; s = b.getElementsByTagName(e)[0];
           s.parentNode.insertBefore(t, s);
         })(window, document, 'script', 'https://connect.facebook.net/en_US/fbevents.js');
@@ -129,6 +134,50 @@ export default function EcommerceCliente() {
       if (nData) setNeighborhoods(nData);
     }
     setLoading(false);
+  };
+
+  // SALVAR ID DO PEDIDO NO LOCALSTORAGE
+  const saveOrderIdToLocal = (orderId) => {
+    if (typeof window !== 'undefined' && tenant?.id) {
+      const storageKey = `my_orders_${tenant.id}`;
+      const existing = JSON.parse(localStorage.getItem(storageKey) || '[]');
+      if (!existing.includes(orderId)) {
+        existing.unshift(orderId);
+        localStorage.setItem(storageKey, JSON.stringify(existing));
+      }
+    }
+  };
+
+  // BUSCAR HISTÓRICO DE PEDIDOS DO CLIENTE
+  const handleOpenMyOrders = async () => {
+    setShowMyOrdersModal(true);
+    setLoadingMyOrders(true);
+
+    try {
+      if (typeof window !== 'undefined' && tenant?.id) {
+        const storageKey = `my_orders_${tenant.id}`;
+        const storedIds = JSON.parse(localStorage.getItem(storageKey) || '[]');
+
+        if (storedIds.length > 0) {
+          const { data, error } = await supabase
+            .from('orders')
+            .select('*')
+            .eq('tenant_id', tenant.id)
+            .in('id', storedIds)
+            .order('id', { ascending: false });
+
+          if (!error && data) {
+            setMyOrdersList(data);
+          }
+        } else {
+          setMyOrdersList([]);
+        }
+      }
+    } catch (e) {
+      console.error("Erro ao buscar histórico de pedidos:", e);
+    } finally {
+      setLoadingMyOrders(false);
+    }
   };
 
   const handleOpenProductModal = (product) => {
@@ -255,7 +304,7 @@ export default function EcommerceCliente() {
       setCepError('Erro ao consultar o CEP. Tente novamente.');
       setCalculatedOptions([]);
       setSelectedShippingOption(null);
-    } finally {
+    } font-sans finally {
       setIsCalculatingCep(false);
     }
   };
@@ -385,7 +434,7 @@ export default function EcommerceCliente() {
   const promoBannerList = tenant?.promo_banners ? tenant.promo_banners.split(',').map(b => b.trim()).filter(Boolean) : [];
 
   // ==========================================
-  // FUNÇÃO DE FINALIZAR O PEDIDO (SUPORTE A PIX E CHECKOUT PRO DE CARTÃO)
+  // FUNÇÃO DE FINALIZAR O PEDIDO
   // ==========================================
   const handleFinishOrder = async (e) => {
     e.preventDefault();
@@ -443,6 +492,9 @@ export default function EcommerceCliente() {
       return;
     }
 
+    // SALVA NO LOCALSTORAGE DO NAVEGADOR DO CLIENTE
+    saveOrderIdToLocal(insertedOrder.id);
+
     setCurrentOrderId(insertedOrder.id);
     setCurrentOrderPayload({ ...orderPayload, shippingLabel });
 
@@ -494,7 +546,7 @@ export default function EcommerceCliente() {
       }
     }
 
-    // 2. PAGAMENTO VIA CARTÃO DE CRÉDITO OU DÉBITO (CHECKOUT PRO MERCADO PAGO)
+    // 2. PAGAMENTO VIA CARTÃO DE CRÉDITO OU DÉBITO
     const isCardPayment = paymentMethod.includes('Cartão') && tenant.pix_access_token;
 
     if (isCardPayment) {
@@ -533,13 +585,13 @@ export default function EcommerceCliente() {
       }
     }
 
-    // 3. PAGAMENTO PRESENCIAL / DINHEIRO (FALLBACK DIRETO PARA WHATSAPP)
+    // 3. PAGAMENTO PRESENCIAL / DINHEIRO
     sendWhatsAppNotification(insertedOrder, false);
 
     setIsSubmitting(false);
     setCart([]);
     setShowCartModal(false);
-    alert("Pedido registrado e enviado para o WhatsApp com sucesso!");
+    alert("Pedido registrado com sucesso!");
   };
 
   if (loading) return <div className="min-h-screen bg-gray-950 text-white flex items-center justify-center font-sans"><p className="text-xs text-gray-400">Carregando loja...</p></div>;
@@ -561,15 +613,24 @@ export default function EcommerceCliente() {
       <div className="relative h-36 bg-gray-900 border-b border-white/10">
         <img src={tenant.banner_url || 'https://images.unsplash.com/photo-1441986300917-64674bd600d8?w=800&auto=format&fit=crop&q=80'} alt="Capa da Loja" className="w-full h-full object-cover opacity-50" />
         
-        {tenant.instagram_url && (
-          <a
-            href={tenant.instagram_url.startsWith('http') ? tenant.instagram_url : `https://${tenant.instagram_url}`}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="absolute top-3 right-3 bg-gradient-to-r from-purple-600 via-pink-600 to-orange-500 text-white font-bold text-[10px] px-3 py-1.5 rounded-full shadow-lg transition flex items-center space-x-1 hover:opacity-90 z-10">
-            <span>📸 Instagram</span>
-          </a>
-        )}
+        <div className="absolute top-3 right-3 flex items-center space-x-2 z-10">
+          {/* BOTÃO MEUS PEDIDOS */}
+          <button
+            onClick={handleOpenMyOrders}
+            className="bg-gray-900/90 hover:bg-black text-white font-bold text-[10px] px-3 py-1.5 rounded-full border border-white/20 shadow-lg transition flex items-center space-x-1">
+            <span>📦 Meus Pedidos</span>
+          </button>
+
+          {tenant.instagram_url && (
+            <a
+              href={tenant.instagram_url.startsWith('http') ? tenant.instagram_url : `https://${tenant.instagram_url}`}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="bg-gradient-to-r from-purple-600 via-pink-600 to-orange-500 text-white font-bold text-[10px] px-3 py-1.5 rounded-full shadow-lg transition flex items-center space-x-1 hover:opacity-90">
+              <span>📸 Instagram</span>
+            </a>
+          )}
+        </div>
 
         <div className="absolute -bottom-5 left-4 flex items-center space-x-3">
           <img src={tenant.logo_url || 'https://images.unsplash.com/photo-1522335789203-aabd1fc54bc9?w=150&auto=format&fit=crop&q=80'} alt="Logo" className="w-16 h-16 rounded-full border-2 border-black/40 object-cover bg-gray-800 shadow-lg" />
@@ -693,6 +754,62 @@ export default function EcommerceCliente() {
             <span className="text-xs font-bold uppercase tracking-wider">Finalizar Compra</span>
             <span className="text-xs font-bold">R$ {total.toFixed(2)}</span>
           </button>
+        </div>
+      )}
+
+      {/* MODAL MEUS PEDIDOS / HISTÓRICO */}
+      {showMyOrdersModal && (
+        <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 p-4">
+          <div style={{ backgroundColor: cardColor, color: textColor }} className="border border-white/10 w-full max-w-sm rounded-2xl p-5 space-y-4 shadow-2xl max-h-[90vh] overflow-y-auto">
+            <div className="flex justify-between items-center border-b border-white/10 pb-2">
+              <h3 className="font-bold text-sm" style={{ color: primaryColor }}>📦 Meus Pedidos Recentes</h3>
+              <button onClick={() => setShowMyOrdersModal(false)} className="opacity-60 font-bold text-xs">✕ Fechar</button>
+            </div>
+
+            {loadingMyOrders ? (
+              <p className="text-xs text-gray-400 text-center py-6">Carregando seus pedidos...</p>
+            ) : myOrdersList.length === 0 ? (
+              <div className="text-center py-6 space-y-2">
+                <span className="text-3xl block">🛍️</span>
+                <p className="text-xs text-gray-400 font-bold">Nenhum pedido encontrado neste dispositivo.</p>
+                <p className="text-[10px] text-gray-500">Seus pedidos recentes aparecerão aqui automaticamente.</p>
+              </div>
+            ) : (
+              <div className="space-y-3">
+                {myOrdersList.map(ord => {
+                  const isPaid = ord.is_paid || ord.payment_method?.includes('PAGO');
+                  return (
+                    <div key={ord.id} style={{ backgroundColor: bgColor }} className="p-3.5 rounded-xl border border-white/10 space-y-2 text-xs">
+                      <div className="flex justify-between items-start">
+                        <div>
+                          <span className="font-bold text-white block">PEDIDO #{ord.id}</span>
+                          <span className="text-[10px] text-gray-400 block">{new Date(ord.created_at || Date.now()).toLocaleDateString('pt-BR')}</span>
+                        </div>
+                        <span className={`text-[9px] font-bold px-2 py-0.5 rounded-md border ${
+                          isPaid ? 'bg-green-500/20 text-green-400 border-green-500/30' : 'bg-yellow-500/20 text-yellow-400 border-yellow-500/30'
+                        }`}>
+                          {isPaid ? '🟢 PAGO' : '🟡 PENDENTE'}
+                        </span>
+                      </div>
+
+                      <div className="flex justify-between items-center pt-2 border-t border-white/5">
+                        <span className="font-bold text-white">Total: R$ {Number(ord.total).toFixed(2)}</span>
+                        <button
+                          onClick={() => {
+                            setShowMyOrdersModal(false);
+                            router.push(`/${slug}/pedido/${ord.id}`);
+                          }}
+                          style={{ backgroundColor: primaryColor, color: btnTextColor }}
+                          className="px-3 py-1.5 rounded-lg font-bold text-[10px] transition shadow">
+                          🔎 Acompanhar Pedido
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
         </div>
       )}
 
