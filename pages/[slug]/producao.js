@@ -114,7 +114,7 @@ export default function FilaProducao() {
     }
   };
 
-  // ENVIAR NOTIFICAÇÃO NO WHATSAPP QUE SAIU PARA ENTREGA OU RETIRADA
+  // ENVIAR NOTIFICAÇÃO NO WHATSAPP COM LINK DE RASTREAMENTO DIRETO
   const handleSendWhatsAppDelivery = (order) => {
     if (!order.customer_phone) return alert("Telefone do cliente não encontrado.");
 
@@ -123,17 +123,23 @@ export default function FilaProducao() {
       cleanPhone = `55${cleanPhone}`;
     }
 
+    // Link automático de acompanhamento para o cliente final
+    const origin = typeof window !== 'undefined' ? window.location.origin : '';
+    const trackingUrl = `${origin}/${slug}/pedido/${order.id}`;
+
     const isPickup = order.address === 'Retirada na Loja' || order.neighborhood === 'Retirar na Loja';
     let msg = `Olá *${order.customer_name}*! 👋\n\n`;
 
     if (isPickup) {
       msg += `Seu pedido *#${order.id}* na loja *${tenant?.name || 'nossa loja'}* já está *PRONTO PARA RETIRADA*! 🏪✨\n\n`;
-      msg += `Você já pode passar para retirar seu pacote. Estamos te aguardando!`;
+      msg += `Você já pode passar para retirar seu pacote. Estamos te aguardando!\n\n`;
     } else {
       msg += `Seu pedido *#${order.id}* na loja *${tenant?.name || 'nossa loja'}* *SAIU PARA ENTREGA*! 🛵💨\n\n`;
       msg += `📍 *Endereço:* ${order.address}\n\n`;
-      msg += `Por favor, fique atento(a) no seu endereço para receber o entregador!`;
+      msg += `Por favor, fique atento(a) no seu endereço para receber o entregador!\n\n`;
     }
+
+    msg += `🔎 *Acompanhe o status em tempo real pelo link:*\n${trackingUrl}`;
 
     window.open(`https://wa.me/${cleanPhone}?text=${encodeURIComponent(msg)}`, '_blank');
   };
@@ -232,7 +238,7 @@ export default function FilaProducao() {
           <div className="w-10 h-10 rounded-2xl bg-blue-600 flex items-center justify-center font-bold text-xl text-white">🛍️</div>
           <div>
             <h1 className="font-bold text-lg text-white">Fila de Produção — {tenant?.name || slug}</h1>
-            <p className="text-xs text-gray-400">Gerencie pedidos, envios, avisos via WhatsApp e arquivamento</p>
+            <p className="text-xs text-gray-400">Gerencie pedidos, envios, rastreamento via WhatsApp e arquivamento</p>
           </div>
         </div>
         <button onClick={fetchData} className="bg-orange-500 hover:bg-orange-600 text-white text-xs font-bold px-4 py-2 rounded-xl transition">
@@ -420,11 +426,11 @@ export default function FilaProducao() {
                   </span>
                 </div>
 
-                {/* BOTÃO PARA ENVIAR NOTIFICAÇÃO DO WHATSAPP */}
+                {/* BOTÃO PARA ENVIAR NOTIFICAÇÃO DO WHATSAPP COM LINK DE RASTREAMENTO */}
                 <button
                   onClick={() => handleSendWhatsAppDelivery(o)}
                   className="w-full bg-green-600 hover:bg-green-500 text-white font-bold py-2 rounded-xl text-xs transition flex items-center justify-center space-x-2 shadow-md">
-                  <span>📱 Avisar Cliente no WhatsApp</span>
+                  <span>📱 Avisar Rastreamento no WhatsApp</span>
                 </button>
 
                 <div className="flex space-x-2 pt-1 border-t border-gray-800/80">
