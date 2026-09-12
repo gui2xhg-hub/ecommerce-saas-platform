@@ -385,7 +385,7 @@ export default function EcommerceCliente() {
   const promoBannerList = tenant?.promo_banners ? tenant.promo_banners.split(',').map(b => b.trim()).filter(Boolean) : [];
 
   // ==========================================
-  // FUNÇÃO DE FINALIZAR O PEDIDO (CORRIGIDA)
+  // FUNÇÃO DE FINALIZAR O PEDIDO (SUPORTE A PIX E CHECKOUT PRO DE CARTÃO)
   // ==========================================
   const handleFinishOrder = async (e) => {
     e.preventDefault();
@@ -450,6 +450,7 @@ export default function EcommerceCliente() {
       window.fbq('track', 'Purchase', { value: total, currency: 'BRL' });
     }
 
+    // 1. PAGAMENTO VIA PIX DINÂMICO
     const isPixDynamic = paymentMethod === 'PIX' && tenant.pix_enabled && tenant.pix_access_token;
 
     if (isPixDynamic) {
@@ -493,6 +494,46 @@ export default function EcommerceCliente() {
       }
     }
 
+    // 2. PAGAMENTO VIA CARTÃO DE CRÉDITO OU DÉBITO (CHECKOUT PRO MERCADO PAGO)
+    const isCardPayment = paymentMethod.includes('Cartão') && tenant.pix_access_token;
+
+    if (isCardPayment) {
+      try {
+        const prefRes = await fetch('/api/create-preference', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            items: cart.map(i => ({ name: i.name, quantity: i.quantity, price: Number(i.price) })),
+            accessToken: tenant.pix_access_token,
+            orderId: insertedOrder.id,
+            tenantName: tenant.name,
+            customerName: customerName,
+            customerPhone: customerPhone
+          })
+        });
+
+        const prefData = await prefRes.json();
+
+        if (prefRes.ok && prefData.init_point) {
+          setIsSubmitting(false);
+          setCart([]);
+          setShowCartModal(false);
+          window.location.href = prefData.init_point;
+          return;
+        } else {
+          alert(`⚠️ Não foi possível iniciar o checkout de cartão:\n${prefData.error || 'Verifique as configurações do Mercado Pago no Admin.'}`);
+          setIsSubmitting(false);
+          return;
+        }
+      } catch (err) {
+        console.error("Erro ao gerar Checkout Pro de cartão:", err);
+        alert("Erro de comunicação ao redirecionar para o pagamento.");
+        setIsSubmitting(false);
+        return;
+      }
+    }
+
+    // 3. PAGAMENTO PRESENCIAL / DINHEIRO (FALLBACK DIRETO PARA WHATSAPP)
     sendWhatsAppNotification(insertedOrder, false);
 
     setIsSubmitting(false);
