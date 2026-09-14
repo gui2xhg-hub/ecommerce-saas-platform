@@ -13,7 +13,7 @@ export default function EcommerceCliente() {
   const [selectedCat, setSelectedCat] = useState('ALL');
   const [loading, setLoading] = useState(true);
 
-  // LISTA DE TAMANHOS DE ROUPA PADRÃO
+  // LISTA DE TAMANHOS DE ROUPA PADRÃO (FALLBACK)
   const DEFAULT_FASHION_SIZES = ['P', 'M', 'G', 'GG', 'XG'];
 
   // MODAL DE DETALHES DO PRODUTO
@@ -68,7 +68,7 @@ export default function EcommerceCliente() {
     }
   }, [router.isReady, slug]);
 
-  // MONITORAMENTO EM TEMPO REAL DO PIX DINÂMICO (POLLING)
+  // POLLING DE MONITORAMENTO EM TEMPO REAL DO PIX DINÂMICO
   useEffect(() => {
     let interval = null;
     if (showPixModal && pixPaymentId && tenant?.pix_access_token && pixStatus !== 'approved') {
@@ -196,7 +196,7 @@ export default function EcommerceCliente() {
           initialVars[v.attribute_name] = v.options[0];
         }
       });
-    } else if (tenant?.niche === 'fashion' || !tenant?.niche) {
+    } else if (!product.is_digital && (tenant?.niche === 'fashion' || !tenant?.niche)) {
       initialVars['Tamanho'] = 'M';
     }
 
@@ -225,7 +225,9 @@ export default function EcommerceCliente() {
       price: Number(selectedProduct.price),
       quantity: productQuantity,
       note: productNote,
-      image: activeImage || selectedProduct.image
+      image: activeImage || selectedProduct.image,
+      is_digital: selectedProduct.is_digital || false,
+      download_url: selectedProduct.download_url || ''
     };
 
     setCart([...cart, cartItem]);
@@ -273,6 +275,7 @@ export default function EcommerceCliente() {
       }
 
       const totalWeight = cart.reduce((acc, item) => {
+        if (item.is_digital) return acc;
         const prod = products.find(p => p.id === item.id);
         return acc + ((prod?.weight_kg || 0.3) * item.quantity);
       }, 0);
@@ -337,25 +340,41 @@ export default function EcommerceCliente() {
     setTimeout(() => setPixCopySuccess(false), 3000);
   };
 
+  // VERIFICA SE O CARRINHO É 100% DIGITAL
+  const isAllDigital = cart.length > 0 && cart.every(item => item.is_digital);
+
   const sendWhatsAppNotification = (orderObj, isPaidConfirmed = false) => {
     let orderTag = orderObj?.id ? ` #${orderObj.id}` : '';
     let itemsText = cart.map(i => {
       let varStr = i.variationsText ? ` [${i.variationsText}]` : '';
-      let txt = `• ${i.quantity}x ${i.name}${varStr} (R$ ${(Number(i.price) * i.quantity).toFixed(2)})`;
+      let digitalStr = i.is_digital ? ' ⚡ (Produto Digital)' : '';
+      let txt = `• ${i.quantity}x ${i.name}${varStr}${digitalStr} (R$ ${(Number(i.price) * i.quantity).toFixed(2)})`;
       if (i.note) txt += `\n    Obs: _"${i.note}"_`;
       return txt;
     }).join('\n\n');
 
     let msg = `*NOVA COMPRA NA LOJA${orderTag} - ${tenant.name.toUpperCase()}*\n\n`;
     msg += `*Cliente:* ${customerName}\n*Telefone:* ${customerPhone}\n`;
-    msg += `*Tipo de Envio:* ${deliveryType === 'ENTREGA' ? `Entrega em: ${customerAddress} (${currentOrderPayload?.shippingLabel || ''})` : 'Retirar na Loja'}\n`;
-    if (destinationCep) msg += `*CEP:* ${destinationCep}\n`;
+
+    if (isAllDigital) {
+      msg += `*Tipo de Envio:* ⚡ Envio Digital (Download / Acesso Direto)\n`;
+    } else {
+      msg += `*Tipo de Envio:* ${deliveryType === 'ENTREGA' ? `Entrega em: ${customerAddress} (${currentOrderPayload?.shippingLabel || ''})` : 'Retirar na Loja'}\n`;
+      if (destinationCep) msg += `*CEP:* ${destinationCep}\n`;
+    }
+
     msg += `\n*ITENS COMPRADOS:*\n${itemsText}\n\n`;
     msg += `*Subtotal:* R$ ${subtotal.toFixed(2)}\n`;
     if (discountValue > 0) {
       msg += `*Desconto (${appliedCoupon?.code}):* -R$ ${discountValue.toFixed(2)}\n`;
     }
-    msg += `*Frete/Envio:* ${activeShippingFee === 0 ? (deliveryType === 'RETIRADA' ? 'Grátis (Retirada)' : 'FRETE GRÁTIS 🎉') : `R$ ${activeShippingFee.toFixed(2)}`}\n`;
+    
+    if (isAllDigital) {
+      msg += `*Frete/Envio:* Sem frete (Produto Digital)\n`;
+    } else {
+      msg += `*Frete/Envio:* ${activeShippingFee === 0 ? (deliveryType === 'RETIRADA' ? 'Grátis (Retirada)' : 'FRETE GRÁTIS 🎉') : `R$ ${activeShippingFee.toFixed(2)}`}\n`;
+    }
+
     msg += `*TOTAL:* *R$ ${total.toFixed(2)}*\n`;
     
     if (isPaidConfirmed) {
@@ -394,7 +413,9 @@ export default function EcommerceCliente() {
   const isFreeShipping = freeThreshold > 0 && subtotal >= freeThreshold;
 
   let activeShippingFee = 0;
-  if (deliveryType === 'RETIRADA') {
+  if (isAllDigital) {
+    activeShippingFee = 0;
+  } else if (deliveryType === 'RETIRADA') {
     activeShippingFee = 0;
   } else if (shippingMode === 'local' || (shippingMode === 'hybrid' && hybridOption === 'bairro')) {
     activeShippingFee = isFreeShipping ? 0 : localShippingFee;
@@ -431,7 +452,7 @@ export default function EcommerceCliente() {
     if (!customerName || !customerPhone) return alert("Preencha seu Nome e WhatsApp!");
     if (!tenant || !tenant.id) return alert("Erro: Dados da loja não carregados corretamente.");
 
-    if (deliveryType === 'ENTREGA') {
+    if (!isAllDigital && deliveryType === 'ENTREGA') {
       if (!customerAddress) return alert("Preencha seu Endereço para entrega!");
 
       if (shippingMode === 'local' || (shippingMode === 'hybrid' && hybridOption === 'bairro')) {
@@ -449,9 +470,11 @@ export default function EcommerceCliente() {
 
     setIsSubmitting(true);
 
-    let shippingLabel = 'Retirar na Loja';
-    if (deliveryType === 'ENTREGA') {
-      if (shippingMode === 'local' || (shippingMode === 'hybrid' && hybridOption === 'bairro')) {
+    let shippingLabel = 'Envio Digital (Download)';
+    if (!isAllDigital) {
+      if (deliveryType === 'RETIRADA') {
+        shippingLabel = 'Retirar na Loja';
+      } else if (shippingMode === 'local' || (shippingMode === 'hybrid' && hybridOption === 'bairro')) {
         shippingLabel = selectedNeighborhood ? `Bairro: ${selectedNeighborhood.name}` : 'Entrega Local';
       } else if (selectedShippingOption) {
         shippingLabel = `${selectedShippingOption.name} (${selectedShippingOption.time})`;
@@ -465,7 +488,7 @@ export default function EcommerceCliente() {
       tenant_id: tenant.id,
       customer_name: customerName,
       customer_phone: customerPhone,
-      address: deliveryType === 'ENTREGA' ? customerAddress : 'Retirada na Loja',
+      address: isAllDigital ? '⚡ Produto Digital - Envio via WhatsApp / Download' : (deliveryType === 'ENTREGA' ? customerAddress : 'Retirada na Loja'),
       neighborhood: shippingLabel,
       items: cart.map(i => ({
         id: i.id,
@@ -474,7 +497,9 @@ export default function EcommerceCliente() {
         price: Number(i.price),
         size: i.variations?.Tamanho || i.variationsText || 'Padrão',
         variationsText: i.variationsText || '',
-        note: i.note || ''
+        note: i.note || '',
+        is_digital: i.is_digital || false,
+        download_url: i.download_url || ''
       })),
       subtotal: Number(subtotal.toFixed(2)),
       delivery_fee: Number(activeShippingFee.toFixed(2)),
@@ -596,7 +621,7 @@ export default function EcommerceCliente() {
   if (!tenant) return <div className="min-h-screen bg-gray-950 text-white flex items-center justify-center font-sans"><h1 className="text-xl font-bold text-orange-500">Loja não encontrada</h1></div>;
 
   const hasCustomVariations = selectedProduct?.variations_json && Array.isArray(selectedProduct.variations_json) && selectedProduct.variations_json.length > 0;
-  const isFashionFallback = !hasCustomVariations && (tenant?.niche === 'fashion' || !tenant?.niche);
+  const isFashionFallback = !selectedProduct?.is_digital && !hasCustomVariations && (tenant?.niche === 'fashion' || !tenant?.niche);
 
   const productGallery = selectedProduct?.images_json && Array.isArray(selectedProduct.images_json) && selectedProduct.images_json.length > 0
     ? selectedProduct.images_json
@@ -608,7 +633,7 @@ export default function EcommerceCliente() {
   return (
     <div className="min-h-screen font-sans pb-24 max-w-md mx-auto transition-colors duration-300" style={{ backgroundColor: bgColor, color: textColor }}>
       
-      {/* BARRA DE AVISOS E COMUNICADOS (DESTAQUE NO TOPO) */}
+      {/* BARRA DE AVISOS E COMUNICADOS */}
       {tenant.custom_message && (
         <div className="bg-gradient-to-r from-orange-600 via-amber-600 to-orange-500 text-white text-[11px] font-bold py-2.5 px-4 text-center shadow-md flex items-center justify-center space-x-2">
           <span>📢 {tenant.custom_message}</span>
@@ -713,11 +738,18 @@ export default function EcommerceCliente() {
               style={{ backgroundColor: cardColor }} 
               className="p-3 rounded-2xl border border-white/10 flex flex-col justify-between cursor-pointer hover:border-white/20 transition relative group">
               
-              {hasPromo && (
-                <div className="absolute top-2.5 right-2.5 z-10 bg-gradient-to-r from-red-600 to-orange-500 text-white font-extrabold text-[9px] px-2 py-0.5 rounded-full shadow-lg border border-white/20 uppercase tracking-wider animate-pulse">
-                  -{discPercent}% OFF
-                </div>
-              )}
+              <div className="absolute top-2.5 right-2.5 z-10 flex flex-col items-end space-y-1">
+                {hasPromo && (
+                  <span className="bg-gradient-to-r from-red-600 to-orange-500 text-white font-extrabold text-[9px] px-2 py-0.5 rounded-full shadow-lg border border-white/20 uppercase tracking-wider animate-pulse">
+                    -{discPercent}% OFF
+                  </span>
+                )}
+                {p.is_digital && (
+                  <span className="bg-blue-600/90 text-white font-extrabold text-[8px] px-2 py-0.5 rounded-full shadow border border-blue-400/30 uppercase tracking-wider">
+                    ⚡ Digital
+                  </span>
+                )}
+              </div>
 
               <div>
                 <div className="relative overflow-hidden rounded-xl mb-2">
@@ -824,7 +856,12 @@ export default function EcommerceCliente() {
           <div style={{ backgroundColor: cardColor, color: textColor }} className="border border-white/10 w-full max-w-sm rounded-2xl p-5 space-y-4 shadow-2xl max-h-[90vh] overflow-y-auto">
             <div className="flex justify-between items-start border-b border-white/10 pb-2 gap-2">
               <div className="flex-1">
-                <h3 className="font-bold text-sm leading-snug" style={{ color: primaryColor }}>{selectedProduct.name}</h3>
+                <div className="flex items-center space-x-2">
+                  <h3 className="font-bold text-sm leading-snug" style={{ color: primaryColor }}>{selectedProduct.name}</h3>
+                  {selectedProduct.is_digital && (
+                    <span className="bg-blue-500/20 text-blue-400 border border-blue-500/30 text-[9px] font-bold px-2 py-0.5 rounded-md shrink-0">⚡ Digital</span>
+                  )}
+                </div>
                 {selectedProductHasPromo && (
                   <span className="inline-block bg-red-500/20 text-red-400 border border-red-500/30 text-[10px] font-bold px-2 py-0.5 rounded-md mt-1">
                     🔥 OFERTA ESPECIAL — ECONOMIZE R$ {selectedProductSavings.toFixed(2)}
@@ -871,6 +908,12 @@ export default function EcommerceCliente() {
               </div>
               <p className="text-xs opacity-70">{selectedProduct.description}</p>
             </div>
+
+            {selectedProduct.is_digital && (
+              <div className="bg-blue-500/10 border border-blue-500/20 p-2.5 rounded-xl text-xs text-blue-300">
+                ⚡ <b>Produto Digital:</b> Acesso imediato liberado após confirmação do pagamento. Não exige envio físico.
+              </div>
+            )}
 
             {hasCustomVariations && selectedProduct.variations_json.map((v, idx) => (
               <div key={idx} className="space-y-2 pt-2 border-t border-white/10">
@@ -952,7 +995,7 @@ export default function EcommerceCliente() {
         </div>
       )}
 
-      {/* MODAL DO CARRINHO & CHECKOUT (FRETE E BAIRROS DESCOMPLICADOS) */}
+      {/* MODAL DO CARRINHO & CHECKOUT */}
       {showCartModal && (
         <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 p-4">
           <div style={{ backgroundColor: cardColor, color: textColor }} className="border border-white/10 w-full max-w-sm rounded-2xl p-5 space-y-4 shadow-2xl max-h-[90vh] overflow-y-auto">
@@ -961,7 +1004,7 @@ export default function EcommerceCliente() {
               <button onClick={() => setShowCartModal(false)} className="opacity-60 font-bold text-xs">✕ Fechar</button>
             </div>
 
-            {freeThreshold > 0 && (
+            {!isAllDigital && freeThreshold > 0 && (
               <div 
                 className="text-[11px] p-2.5 rounded-xl font-bold text-center border transition"
                 style={{ 
@@ -977,11 +1020,20 @@ export default function EcommerceCliente() {
               </div>
             )}
 
+            {isAllDigital && (
+              <div className="bg-blue-500/15 border border-blue-500/30 text-blue-300 text-[11px] p-2.5 rounded-xl font-bold text-center">
+                ⚡ Seus produtos são <b>100% Digitais</b>! Isenção total de taxa de frete.
+              </div>
+            )}
+
             <div className="space-y-2 max-h-48 overflow-y-auto">
               {cart.map(item => (
                 <div key={item.cartItemId} style={{ backgroundColor: bgColor }} className="p-2.5 rounded-xl border border-white/10 flex justify-between items-start text-xs space-x-2">
                   <div className="flex-1">
-                    <span className="font-bold block">{item.quantity}x {item.name}</span>
+                    <div className="flex items-center space-x-1.5">
+                      <span className="font-bold block">{item.quantity}x {item.name}</span>
+                      {item.is_digital && <span className="bg-blue-500/20 text-blue-400 text-[9px] font-bold px-1.5 py-0.2 rounded">⚡ Digital</span>}
+                    </div>
                     {item.variationsText && (
                       <span className="text-[10px] font-bold text-orange-400 block">{item.variationsText}</span>
                     )}
@@ -1022,140 +1074,143 @@ export default function EcommerceCliente() {
             </form>
 
             <form onSubmit={handleFinishOrder} className="space-y-3 pt-2 border-t border-white/10">
-              <div className="flex space-x-2">
-                <button
-                  type="button"
-                  onClick={() => setDeliveryType('ENTREGA')}
-                  style={{ 
-                    backgroundColor: deliveryType === 'ENTREGA' ? primaryColor : bgColor,
-                    color: deliveryType === 'ENTREGA' ? btnTextColor : textColor
-                  }}
-                  className={`py-2 rounded-xl text-xs font-bold border border-white/10 ${allowPickup ? 'w-1/2' : 'w-full'}`}>
-                  🛵 Entrega {isFreeShipping ? '(GRÁTIS)' : ''}
-                </button>
-
-                {allowPickup && (
-                  <button
-                    type="button"
-                    onClick={() => setDeliveryType('RETIRADA')}
-                    style={{ 
-                      backgroundColor: deliveryType === 'RETIRADA' ? primaryColor : bgColor,
-                      color: deliveryType === 'RETIRADA' ? btnTextColor : textColor
-                    }}
-                    className="w-1/2 py-2 rounded-xl text-xs font-bold border border-white/10">
-                    🏪 Retirar na Loja
-                  </button>
-                )}
-              </div>
-
-              {deliveryType === 'ENTREGA' && (
+              
+              {/* OPÇÕES DE ENTREGA OCULTAS SE TUDO FOR DIGITAL */}
+              {!isAllDigital && (
                 <>
-                  {/* ALTERNADOR EXCLUSIVO PARA MODO HÍBRIDO */}
-                  {shippingMode === 'hybrid' && (
-                    <div className="flex space-x-2 mb-2 bg-black/40 p-1 rounded-xl border border-white/10">
+                  <div className="flex space-x-2">
+                    <button
+                      type="button"
+                      onClick={() => setDeliveryType('ENTREGA')}
+                      style={{ 
+                        backgroundColor: deliveryType === 'ENTREGA' ? primaryColor : bgColor,
+                        color: deliveryType === 'ENTREGA' ? btnTextColor : textColor
+                      }}
+                      className={`py-2 rounded-xl text-xs font-bold border border-white/10 ${allowPickup ? 'w-1/2' : 'w-full'}`}>
+                      🛵 Entrega {isFreeShipping ? '(GRÁTIS)' : ''}
+                    </button>
+
+                    {allowPickup && (
                       <button
                         type="button"
-                        onClick={() => setHybridOption('bairro')}
-                        className={`flex-1 py-1.5 rounded-lg text-[10px] font-bold transition ${
-                          hybridOption === 'bairro' ? 'bg-orange-500 text-white shadow' : 'text-gray-400 hover:text-white'
-                        }`}>
-                        🛵 Entrega por Bairro
+                        onClick={() => setDeliveryType('RETIRADA')}
+                        style={{ 
+                          backgroundColor: deliveryType === 'RETIRADA' ? primaryColor : bgColor,
+                          color: deliveryType === 'RETIRADA' ? btnTextColor : textColor
+                        }}
+                        className="w-1/2 py-2 rounded-xl text-xs font-bold border border-white/10">
+                        🏪 Retirar na Loja
                       </button>
-                      <button
-                        type="button"
-                        onClick={() => setHybridOption('cep')}
-                        className={`flex-1 py-1.5 rounded-lg text-[10px] font-bold transition ${
-                          hybridOption === 'cep' ? 'bg-orange-500 text-white shadow' : 'text-gray-400 hover:text-white'
-                        }`}>
-                        📦 Envio por CEP
-                      </button>
-                    </div>
-                  )}
+                    )}
+                  </div>
 
-                  {/* CÁLCULO DE CEP (APENAS QUANDO SELECIONADO CEP OU MODO NACIONAL) */}
-                  {(shippingMode === 'national' || (shippingMode === 'hybrid' && hybridOption === 'cep')) && (
-                    <div className="space-y-2 p-3 rounded-xl border border-white/10 bg-black/20">
-                      <label className="text-[11px] font-bold block text-orange-400">📦 Digite seu CEP para calcular o Frete:</label>
-                      <div className="flex space-x-2">
-                        <input
-                          type="text"
-                          placeholder="Ex: 01001-000"
-                          value={destinationCep}
-                          onChange={(e) => {
-                            const val = e.target.value;
-                            setDestinationCep(val);
-                            const cleanVal = val.replace(/\D/g, '');
-
-                            if (cleanVal.length === 8) {
-                              handleCalculateCep(val);
-                            } else {
-                              setCalculatedOptions([]);
-                              setSelectedShippingOption(null);
-                              setCepError('');
-                            }
-                          }}
-                          style={{ backgroundColor: bgColor, color: textColor }}
-                          className="flex-1 border border-white/10 p-2 rounded-xl text-xs font-mono focus:outline-none"
-                        />
-                        <button
-                          type="button"
-                          onClick={() => handleCalculateCep()}
-                          disabled={isCalculatingCep}
-                          style={{ backgroundColor: primaryColor, color: btnTextColor }}
-                          className="px-3 py-2 rounded-xl text-xs font-bold transition">
-                          {isCalculatingCep ? 'Calculando...' : 'Calcular'}
-                        </button>
-                      </div>
-
-                      {cepError && <p className="text-[10px] text-red-400 font-bold">{cepError}</p>}
-
-                      {calculatedOptions.length > 0 && (
-                        <div className="space-y-1.5 pt-2">
-                          <label className="text-[10px] opacity-70 block">Opções de Envio Disponíveis:</label>
-                          {calculatedOptions.map(opt => (
-                            <label
-                              key={opt.id}
-                              className={`flex justify-between items-center p-2 rounded-xl border text-xs cursor-pointer transition ${
-                                selectedShippingOption?.id === opt.id ? 'border-orange-500 bg-orange-500/10' : 'border-white/10 bg-black/30'
-                              }`}>
-                              <div className="flex items-center space-x-2">
-                                <input
-                                  type="radio"
-                                  name="shippingOption"
-                                  checked={selectedShippingOption?.id === opt.id}
-                                  onChange={() => setSelectedShippingOption(opt)}
-                                  className="accent-orange-500"
-                                />
-                                <div>
-                                  <span className="font-bold block text-white">{opt.name}</span>
-                                  <span className="text-[10px] opacity-60">Prazo: {opt.time}</span>
-                                </div>
-                              </div>
-                              <span className="font-bold text-orange-400">
-                                {opt.fee === 0 ? 'GRÁTIS' : `R$ ${opt.fee.toFixed(2)}`}
-                              </span>
-                            </label>
-                          ))}
+                  {deliveryType === 'ENTREGA' && (
+                    <>
+                      {shippingMode === 'hybrid' && (
+                        <div className="flex space-x-2 mb-2 bg-black/40 p-1 rounded-xl border border-white/10">
+                          <button
+                            type="button"
+                            onClick={() => setHybridOption('bairro')}
+                            className={`flex-1 py-1.5 rounded-lg text-[10px] font-bold transition ${
+                              hybridOption === 'bairro' ? 'bg-orange-500 text-white shadow' : 'text-gray-400 hover:text-white'
+                            }`}>
+                            🛵 Entrega por Bairro
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setHybridOption('cep')}
+                            className={`flex-1 py-1.5 rounded-lg text-[10px] font-bold transition ${
+                              hybridOption === 'cep' ? 'bg-orange-500 text-white shadow' : 'text-gray-400 hover:text-white'
+                            }`}>
+                            📦 Envio por CEP
+                          </button>
                         </div>
                       )}
-                    </div>
-                  )}
 
-                  {/* SELEÇÃO DE BAIRROS (APENAS QUANDO MODO LOCAL OU HÍBRIDO BAIRRO) */}
-                  {(shippingMode === 'local' || (shippingMode === 'hybrid' && hybridOption === 'bairro')) && (
-                    <div>
-                      <label className="text-[11px] opacity-70 block mb-1">Selecione seu Bairro de Entrega:</label>
-                      <select
-                        value={selectedNeighId}
-                        onChange={(e) => setSelectedNeighId(e.target.value)}
-                        style={{ backgroundColor: bgColor, color: textColor }}
-                        className="w-full border border-white/10 p-2.5 rounded-xl text-xs focus:outline-none font-bold">
-                        <option value="">-- Selecione seu Bairro --</option>
-                        {neighborhoods.map(n => (
-                          <option key={n.id} value={n.id}>{n.name} — R$ {Number(n.fee).toFixed(2)}</option>
-                        ))}
-                      </select>
-                    </div>
+                      {(shippingMode === 'national' || (shippingMode === 'hybrid' && hybridOption === 'cep')) && (
+                        <div className="space-y-2 p-3 rounded-xl border border-white/10 bg-black/20">
+                          <label className="text-[11px] font-bold block text-orange-400">📦 Digite seu CEP para calcular o Frete:</label>
+                          <div className="flex space-x-2">
+                            <input
+                              type="text"
+                              placeholder="Ex: 01001-000"
+                              value={destinationCep}
+                              onChange={(e) => {
+                                const val = e.target.value;
+                                setDestinationCep(val);
+                                const cleanVal = val.replace(/\D/g, '');
+
+                                if (cleanVal.length === 8) {
+                                  handleCalculateCep(val);
+                                } else {
+                                  setCalculatedOptions([]);
+                                  setSelectedShippingOption(null);
+                                  setCepError('');
+                                }
+                              }}
+                              style={{ backgroundColor: bgColor, color: textColor }}
+                              className="flex-1 border border-white/10 p-2 rounded-xl text-xs font-mono focus:outline-none"
+                            />
+                            <button
+                              type="button"
+                              onClick={() => handleCalculateCep()}
+                              disabled={isCalculatingCep}
+                              style={{ backgroundColor: primaryColor, color: btnTextColor }}
+                              className="px-3 py-2 rounded-xl text-xs font-bold transition">
+                              {isCalculatingCep ? 'Calculando...' : 'Calcular'}
+                            </button>
+                          </div>
+
+                          {cepError && <p className="text-[10px] text-red-400 font-bold">{cepError}</p>}
+
+                          {calculatedOptions.length > 0 && (
+                            <div className="space-y-1.5 pt-2">
+                              <label className="text-[10px] opacity-70 block">Opções de Envio Disponíveis:</label>
+                              {calculatedOptions.map(opt => (
+                                <label
+                                  key={opt.id}
+                                  className={`flex justify-between items-center p-2 rounded-xl border text-xs cursor-pointer transition ${
+                                    selectedShippingOption?.id === opt.id ? 'border-orange-500 bg-orange-500/10' : 'border-white/10 bg-black/30'
+                                  }`}>
+                                  <div className="flex items-center space-x-2">
+                                    <input
+                                      type="radio"
+                                      name="shippingOption"
+                                      checked={selectedShippingOption?.id === opt.id}
+                                      onChange={() => setSelectedShippingOption(opt)}
+                                      className="accent-orange-500"
+                                    />
+                                    <div>
+                                      <span className="font-bold block text-white">{opt.name}</span>
+                                      <span className="text-[10px] opacity-60">Prazo: {opt.time}</span>
+                                    </div>
+                                  </div>
+                                  <span className="font-bold text-orange-400">
+                                    {opt.fee === 0 ? 'GRÁTIS' : `R$ ${opt.fee.toFixed(2)}`}
+                                  </span>
+                                </label>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      )}
+
+                      {(shippingMode === 'local' || (shippingMode === 'hybrid' && hybridOption === 'bairro')) && (
+                        <div>
+                          <label className="text-[11px] opacity-70 block mb-1">Selecione seu Bairro de Entrega:</label>
+                          <select
+                            value={selectedNeighId}
+                            onChange={(e) => setSelectedNeighId(e.target.value)}
+                            style={{ backgroundColor: bgColor, color: textColor }}
+                            className="w-full border border-white/10 p-2.5 rounded-xl text-xs focus:outline-none font-bold">
+                            <option value="">-- Selecione seu Bairro --</option>
+                            {neighborhoods.map(n => (
+                              <option key={n.id} value={n.id}>{n.name} — R$ {Number(n.fee).toFixed(2)}</option>
+                            ))}
+                          </select>
+                        </div>
+                      )}
+                    </>
                   )}
                 </>
               )}
@@ -1166,11 +1221,11 @@ export default function EcommerceCliente() {
               </div>
 
               <div>
-                <label className="text-[11px] opacity-70 block mb-1">Seu WhatsApp:</label>
+                <label className="text-[11px] opacity-70 block mb-1">Seu WhatsApp (Recebimento dos Links):</label>
                 <input type="text" required value={customerPhone} onChange={(e) => setCustomerPhone(e.target.value)} style={{ backgroundColor: bgColor, color: textColor }} className="w-full border border-white/10 p-2.5 rounded-xl text-xs focus:outline-none" />
               </div>
 
-              {deliveryType === 'ENTREGA' && (
+              {!isAllDigital && deliveryType === 'ENTREGA' && (
                 <div>
                   <label className="text-[11px] opacity-70 block mb-1">Endereço Completo de Entrega:</label>
                   <input type="text" required value={customerAddress} onChange={(e) => setCustomerAddress(e.target.value)} style={{ backgroundColor: bgColor, color: textColor }} className="w-full border border-white/10 p-2.5 rounded-xl text-xs focus:outline-none" placeholder="Rua, número, complemento, bairro, cidade/UF" />
@@ -1183,7 +1238,7 @@ export default function EcommerceCliente() {
                   <option value="PIX">PIX</option>
                   <option value="Cartão de Crédito">Cartão de Crédito</option>
                   <option value="Cartão de Débito">Cartão de Débito</option>
-                  <option value="Dinheiro">Dinheiro</option>
+                  {!isAllDigital && <option value="Dinheiro">Dinheiro</option>}
                 </select>
               </div>
 
@@ -1200,9 +1255,9 @@ export default function EcommerceCliente() {
                 <div className="flex justify-between">
                   <span className="opacity-60">Taxa de Frete/Envio:</span>
                   <span>
-                    {deliveryType === 'RETIRADA' 
-                      ? 'Grátis' 
-                      : (isFreeShipping ? '🎉 FRETE GRÁTIS' : `R$ ${activeShippingFee.toFixed(2)}`)}
+                    {isAllDigital 
+                      ? '⚡ Digital (Grátis)' 
+                      : (deliveryType === 'RETIRADA' ? 'Grátis' : (isFreeShipping ? '🎉 FRETE GRÁTIS' : `R$ ${activeShippingFee.toFixed(2)}`))}
                   </span>
                 </div>
 
@@ -1278,6 +1333,10 @@ export default function EcommerceCliente() {
                   sendWhatsAppNotification({ id: currentOrderId }, pixStatus === 'approved');
                   setShowPixModal(false);
                   setCart([]);
+                  setShowCartModal(false);
+                  if (currentOrderId) {
+                    router.push(`/${slug}/pedido/${currentOrderId}`);
+                  }
                 }}
                 className="w-full bg-green-500 hover:bg-green-600 text-white font-extrabold py-3.5 rounded-xl text-xs transition shadow-lg flex items-center justify-center space-x-2">
                 <span>💬 Enviar Confirmação no WhatsApp</span>
@@ -1288,9 +1347,13 @@ export default function EcommerceCliente() {
                 onClick={() => {
                   setShowPixModal(false);
                   setCart([]);
+                  setShowCartModal(false);
+                  if (currentOrderId) {
+                    router.push(`/${slug}/pedido/${currentOrderId}`);
+                  }
                 }}
                 className="text-[11px] opacity-60 hover:opacity-100 font-bold block mx-auto pt-1">
-                Fechar Janela
+                Acompanhar Pedido
               </button>
             </div>
           </div>
