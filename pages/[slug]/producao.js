@@ -72,7 +72,7 @@ export default function FilaProducao() {
       }
     } catch (err) {
       setErrorMessage("Erro inesperado: " + err.message);
-    } finally {
+    } font
       setLoading(false);
     }
   };
@@ -86,6 +86,15 @@ export default function FilaProducao() {
   // VERIFICA SE O PEDIDO FOI PAGO
   const isOrderPaid = (order) => {
     return Boolean(order.is_paid) || Boolean(order.payment_method?.includes('PAGO'));
+  };
+
+  // VERIFICA SE O PEDIDO É 100% DIGITAL OU CONTÉM PRODUTOS DIGITAIS
+  const isDigitalOrder = (order) => {
+    if (order.neighborhood?.includes('Digital') || order.address?.includes('Digital')) return true;
+    if (Array.isArray(order.items) && order.items.length > 0) {
+      return order.items.every(i => i.is_digital);
+    }
+    return false;
   };
 
   // ALTERAR MANUALMENTE O STATUS DE PAGAMENTO
@@ -114,7 +123,7 @@ export default function FilaProducao() {
     }
   };
 
-  // ENVIAR NOTIFICAÇÃO NO WHATSAPP COM LINK DE RASTREAMENTO DIRETO
+  // ENVIAR NOTIFICAÇÃO NO WHATSAPP COM LINK DE RASTREAMENTO/DOWNLOAD DIRETO
   const handleSendWhatsAppDelivery = (order) => {
     if (!order.customer_phone) return alert("Telefone do cliente não encontrado.");
 
@@ -123,14 +132,18 @@ export default function FilaProducao() {
       cleanPhone = `55${cleanPhone}`;
     }
 
-    // Link automático de acompanhamento para o cliente final
     const origin = typeof window !== 'undefined' ? window.location.origin : '';
     const trackingUrl = `${origin}/${slug}/pedido/${order.id}`;
 
+    const isDigital = isDigitalOrder(order);
     const isPickup = order.address === 'Retirada na Loja' || order.neighborhood === 'Retirar na Loja';
+    
     let msg = `Olá *${order.customer_name}*! 👋\n\n`;
 
-    if (isPickup) {
+    if (isDigital) {
+      msg += `Seu produto digital do pedido *#${order.id}* na loja *${tenant?.name || 'nossa loja'}* já está *LIBERADO*! ⚡💻\n\n`;
+      msg += `Você já pode fazer o acesso e o download dos seus arquivos diretamente pelo link abaixo:\n\n`;
+    } else if (isPickup) {
       msg += `Seu pedido *#${order.id}* na loja *${tenant?.name || 'nossa loja'}* já está *PRONTO PARA RETIRADA*! 🏪✨\n\n`;
       msg += `Você já pode passar para retirar seu pacote. Estamos te aguardando!\n\n`;
     } else {
@@ -139,7 +152,7 @@ export default function FilaProducao() {
       msg += `Por favor, fique atento(a) no seu endereço para receber o entregador!\n\n`;
     }
 
-    msg += `🔎 *Acompanhe o status em tempo real pelo link:*\n${trackingUrl}`;
+    msg += `🔎 *Acesse / Acompanhe pelo link:*\n${trackingUrl}`;
 
     window.open(`https://wa.me/${cleanPhone}?text=${encodeURIComponent(msg)}`, '_blank');
   };
@@ -155,8 +168,13 @@ export default function FilaProducao() {
   const handlePrintOrder = (order) => {
     const printWindow = window.open('', '_blank', 'width=600,height=700');
     const itemsList = Array.isArray(order.items) ? order.items : [];
+    const isDigital = isDigitalOrder(order);
     const isPickup = order.address === 'Retirada na Loja' || order.neighborhood === 'Retirar na Loja';
     const paidText = isOrderPaid(order) ? 'PAGO 🟢' : 'PENDENTE 🔴';
+
+    let shippingTitle = '🛵 ENTREGA EM CASA';
+    if (isDigital) shippingTitle = '⚡ ENVIAR PRODUTO DIGITAL';
+    else if (isPickup) shippingTitle = '🏪 RETIRADA NA LOJA';
 
     const htmlContent = `
       <!DOCTYPE html>
@@ -178,16 +196,16 @@ export default function FilaProducao() {
       <body>
         <div class="header">
           <div class="title">${tenant?.name || 'E-COMMERCE'}</div>
-          <div class="subtitle">ETIQUETA DE ENVIO / SEPARAÇÃO</div>
+          <div class="subtitle">ETIQUETA DE SEPARAÇÃO E ENVIO</div>
           <div class="title" style="margin-top:5px;">PEDIDO #${order.id}</div>
-          <div class="shipping-badge">${isPickup ? '🏪 RETIRADA NA LOJA' : '🛵 ENTREGA EM CASA'}</div>
+          <div class="shipping-badge">${shippingTitle}</div>
         </div>
 
         <div class="section">
           <b>CLIENTE:</b> ${order.customer_name || 'N/A'}<br/>
           <b>TEL:</b> ${order.customer_phone || 'N/A'}<br/>
           <b>ENDEREÇO:</b> ${order.address || 'N/A'}<br/>
-          <b>TIPO DE ENVIO:</b> ${order.neighborhood || (isPickup ? 'Retirada' : 'Entrega')}<br/>
+          <b>TIPO DE ENVIO:</b> ${order.neighborhood || (isDigital ? 'Digital' : (isPickup ? 'Retirada' : 'Entrega'))}<br/>
           <b>PAGAMENTO:</b> ${order.payment_method || 'PIX'} (${paidText})
         </div>
 
@@ -195,9 +213,10 @@ export default function FilaProducao() {
           <b>ITENS DA ENCOMENDA:</b><br/><br/>
           ${itemsList.map(it => `
             <div class="item">
-              <b>${it.quantity}x ${it.name}</b><br/>
+              <b>${it.quantity}x ${it.name}</b> ${it.is_digital ? '[⚡ DIGITAL]' : ''}<br/>
               ${it.variationsText ? `&nbsp;&nbsp;• Opt: <b>${it.variationsText}</b><br/>` : (it.size ? `&nbsp;&nbsp;• Tam: <b>${it.size}</b><br/>` : '')}
               ${it.note ? `&nbsp;&nbsp;• Obs: <i>"${it.note}"</i><br/>` : ''}
+              ${it.download_url ? `&nbsp;&nbsp;• Link: <i>${it.download_url}</i><br/>` : ''}
               &nbsp;&nbsp;• Valor: R$ ${(Number(it.price || 0) * Number(it.quantity || 1)).toFixed(2)}
             </div>
           `).join('')}
@@ -205,7 +224,7 @@ export default function FilaProducao() {
 
         <div class="section">
           Subtotal: R$ ${Number(order.subtotal || 0).toFixed(2)}<br/>
-          Frete/Taxa: ${Number(order.delivery_fee) === 0 ? '<b>GRÁTIS</b>' : `R$ ${Number(order.delivery_fee || 0).toFixed(2)}`}<br/>
+          Frete/Taxa: ${Number(order.delivery_fee) === 0 ? '<b>GRÁTIS / ISENTO</b>' : `R$ ${Number(order.delivery_fee || 0).toFixed(2)}`}<br/>
           <div class="total">TOTAL: R$ ${Number(order.total || 0).toFixed(2)}</div>
         </div>
 
@@ -238,7 +257,7 @@ export default function FilaProducao() {
           <div className="w-10 h-10 rounded-2xl bg-blue-600 flex items-center justify-center font-bold text-xl text-white">🛍️</div>
           <div>
             <h1 className="font-bold text-lg text-white">Fila de Produção — {tenant?.name || slug}</h1>
-            <p className="text-xs text-gray-400">Gerencie pedidos, envios, rastreamento via WhatsApp e arquivamento</p>
+            <p className="text-xs text-gray-400">Gerencie pedidos, entregas físicas, infoprodutos e rastreamento</p>
           </div>
         </div>
         <button onClick={fetchData} className="bg-orange-500 hover:bg-orange-600 text-white text-xs font-bold px-4 py-2 rounded-xl transition">
@@ -265,8 +284,9 @@ export default function FilaProducao() {
             <p className="text-xs text-gray-500 text-center py-4">Nenhum pedido novo no momento.</p>
           ) : (
             novos.map(o => {
+              const isDigital = isDigitalOrder(o);
               const isPickup = o.address === 'Retirada na Loja' || o.neighborhood === 'Retirar na Loja';
-              const isFreeShipping = Number(o.delivery_fee) === 0 && !isPickup;
+              const isFreeShipping = Number(o.delivery_fee) === 0 && !isPickup && !isDigital;
               const paid = isOrderPaid(o);
 
               return (
@@ -294,11 +314,22 @@ export default function FilaProducao() {
 
                   <div className="bg-gray-900 p-2.5 rounded-xl border border-gray-800/80 text-xs space-y-1">
                     <div className="flex justify-between items-center mb-1">
-                      <span className={`text-[10px] font-bold px-2 py-0.5 rounded-md ${isPickup ? 'bg-purple-500/20 text-purple-300 border border-purple-500/30' : 'bg-blue-500/20 text-blue-300 border border-blue-500/30'}`}>
-                        {isPickup ? '🏪 RETIRADA NA LOJA' : '🛵 ENTREGA EM CASA'}
-                      </span>
+                      {isDigital ? (
+                        <span className="text-[10px] font-bold px-2 py-0.5 rounded-md bg-blue-500/20 text-blue-300 border border-blue-500/30">
+                          ⚡ PRODUTO DIGITAL
+                        </span>
+                      ) : isPickup ? (
+                        <span className="text-[10px] font-bold px-2 py-0.5 rounded-md bg-purple-500/20 text-purple-300 border border-purple-500/30">
+                          🏪 RETIRADA NA LOJA
+                        </span>
+                      ) : (
+                        <span className="text-[10px] font-bold px-2 py-0.5 rounded-md bg-orange-500/20 text-orange-300 border border-orange-500/30">
+                          🛵 ENTREGA EM CASA
+                        </span>
+                      )}
+
                       <span className="text-[10px] font-bold text-orange-400">
-                        {isPickup ? 'Frete R$ 0,00' : (isFreeShipping ? '🎁 FRETE GRÁTIS' : `Frete R$ ${Number(o.delivery_fee || 0).toFixed(2)}`)}
+                        {isDigital ? 'Sem Frete' : isPickup ? 'Frete R$ 0,00' : (isFreeShipping ? '🎁 FRETE GRÁTIS' : `Frete R$ ${Number(o.delivery_fee || 0).toFixed(2)}`)}
                       </span>
                     </div>
                     <p className="text-gray-400 text-[11px]"><b>Endereço:</b> {o.address}</p>
@@ -308,7 +339,7 @@ export default function FilaProducao() {
                     {Array.isArray(o.items) && o.items.map((it, idx) => (
                       <div key={idx} className="bg-gray-900/60 p-2 rounded-lg border border-gray-800/50">
                         <div className="flex justify-between text-gray-200">
-                          <span><b>{it.quantity}x</b> {it.name}</span>
+                          <span><b>{it.quantity}x</b> {it.name} {it.is_digital && <span className="text-blue-400 font-bold text-[10px]">[⚡ Digital]</span>}</span>
                           <span className="font-bold">R$ {(Number(it.price || 0) * Number(it.quantity || 1)).toFixed(2)}</span>
                         </div>
                         {(it.variationsText || it.size) && (
@@ -318,6 +349,9 @@ export default function FilaProducao() {
                         )}
                         {it.note && (
                           <p className="text-[10px] text-gray-400 italic">Obs: "{it.note}"</p>
+                        )}
+                        {it.download_url && (
+                          <p className="text-[10px] text-blue-300 truncate mt-0.5">🔗 Download: {it.download_url}</p>
                         )}
                       </div>
                     ))}
@@ -336,7 +370,7 @@ export default function FilaProducao() {
                   </div>
 
                   <button onClick={() => updateOrderStatus(o.id, 'em_producao')} className="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-2.5 rounded-xl text-xs transition">
-                    🚀 Iniciar Produção / Separação ➔
+                    🚀 Iniciar Produção / Liberação ➔
                   </button>
                 </div>
               );
@@ -347,7 +381,7 @@ export default function FilaProducao() {
         {/* COLUNA 2: EM PRODUÇÃO */}
         <div className="bg-gray-900 border border-gray-800 rounded-3xl p-4 space-y-3">
           <h2 className="font-bold text-xs text-blue-400 uppercase tracking-wider flex justify-between items-center border-b border-gray-800 pb-2">
-            <span>⚙️ 2. Em Produção / Separação ({emProducao.length})</span>
+            <span>⚙️ 2. Em Produção / Liberação ({emProducao.length})</span>
           </h2>
 
           {emProducao.length === 0 ? (
@@ -355,6 +389,8 @@ export default function FilaProducao() {
           ) : (
             emProducao.map(o => {
               const paid = isOrderPaid(o);
+              const isDigital = isDigitalOrder(o);
+
               return (
                 <div key={o.id} className="bg-gray-950 p-4 rounded-2xl border border-blue-500/30 space-y-3 shadow-lg">
                   <div className="flex justify-between items-start">
@@ -379,7 +415,7 @@ export default function FilaProducao() {
                   <div className="space-y-1 border-t border-gray-800 pt-2 text-xs">
                     {Array.isArray(o.items) && o.items.map((it, idx) => (
                       <div key={idx} className="flex justify-between text-gray-200">
-                        <span><b>{it.quantity}x</b> {it.name} {it.variationsText ? `(${it.variationsText})` : (it.size ? `(${it.size})` : '')}</span>
+                        <span><b>{it.quantity}x</b> {it.name} {it.is_digital && <span className="text-blue-400 font-bold text-[10px]">[⚡ Digital]</span>}</span>
                       </div>
                     ))}
                   </div>
@@ -397,7 +433,7 @@ export default function FilaProducao() {
                   </div>
 
                   <button onClick={() => updateOrderStatus(o.id, 'pronto')} className="w-full bg-green-600 hover:bg-green-700 text-white font-bold py-2.5 rounded-xl text-xs transition">
-                    📦 Marcar como Pronto / Enviado ➔
+                    {isDigital ? '⚡ Marcar como Liberado ➔' : '📦 Marcar como Pronto / Enviado ➔'}
                   </button>
                 </div>
               );
@@ -405,47 +441,51 @@ export default function FilaProducao() {
           )}
         </div>
 
-        {/* COLUNA 3: PRONTOS / ENVIADOS */}
+        {/* COLUNA 3: PRONTOS / LIBERADOS */}
         <div className="bg-gray-900 border border-gray-800 rounded-3xl p-4 space-y-3">
           <h2 className="font-bold text-xs text-green-400 uppercase tracking-wider flex justify-between items-center border-b border-gray-800 pb-2">
-            <span>📦 3. Prontos / Enviados ({concluidos.length})</span>
+            <span>📦 3. Prontos / Liberados ({concluidos.length})</span>
           </h2>
 
           {concluidos.length === 0 ? (
             <p className="text-xs text-gray-500 text-center py-4">Nenhum pedido concluído.</p>
           ) : (
-            concluidos.map(o => (
-              <div key={o.id} className="bg-gray-950 p-4 rounded-2xl border border-gray-800 space-y-3 shadow-lg">
-                <div className="flex justify-between items-start">
-                  <div>
-                    <h3 className="font-bold text-sm text-white">PEDIDO #{o.id}</h3>
-                    <p className="text-xs text-gray-300 font-bold">{o.customer_name}</p>
+            concluidos.map(o => {
+              const isDigital = isDigitalOrder(o);
+
+              return (
+                <div key={o.id} className="bg-gray-950 p-4 rounded-2xl border border-gray-800 space-y-3 shadow-lg">
+                  <div className="flex justify-between items-start">
+                    <div>
+                      <h3 className="font-bold text-sm text-white">PEDIDO #{o.id}</h3>
+                      <p className="text-xs text-gray-300 font-bold">{o.customer_name}</p>
+                    </div>
+                    <span className="text-[10px] font-bold px-2.5 py-1 rounded-xl bg-green-500/20 text-green-400 border border-green-500/30">
+                      {isDigital ? '✓ LIBERADO' : '✓ PRONTO / ENVIADO'}
+                    </span>
                   </div>
-                  <span className="text-[10px] font-bold px-2.5 py-1 rounded-xl bg-green-500/20 text-green-400 border border-green-500/30">
-                    ✓ PRONTO / ENVIADO
-                  </span>
-                </div>
 
-                {/* BOTÃO PARA ENVIAR NOTIFICAÇÃO DO WHATSAPP COM LINK DE RASTREAMENTO */}
-                <button
-                  onClick={() => handleSendWhatsAppDelivery(o)}
-                  className="w-full bg-green-600 hover:bg-green-500 text-white font-bold py-2 rounded-xl text-xs transition flex items-center justify-center space-x-2 shadow-md">
-                  <span>📱 Avisar Rastreamento no WhatsApp</span>
-                </button>
+                  {/* BOTÃO PARA ENVIAR NOTIFICAÇÃO DO WHATSAPP COM LINK DE DOWNLOAD / RASTREAMENTO */}
+                  <button
+                    onClick={() => handleSendWhatsAppDelivery(o)}
+                    className="w-full bg-green-600 hover:bg-green-500 text-white font-bold py-2 rounded-xl text-xs transition flex items-center justify-center space-x-2 shadow-md">
+                    <span>📱 {isDigital ? 'Enviar Link pelo WhatsApp' : 'Avisar Rastreamento no WhatsApp'}</span>
+                  </button>
 
-                <div className="flex space-x-2 pt-1 border-t border-gray-800/80">
-                  <button onClick={() => handlePrintOrder(o)} className="flex-1 bg-gray-900 hover:bg-gray-800 text-gray-300 py-1.5 rounded-xl font-bold text-[11px] border border-gray-800">
-                    🖨️ Etiqueta
-                  </button>
-                  <button onClick={() => handleArchiveOrder(o.id)} className="flex-1 bg-blue-500/20 hover:bg-blue-500/30 text-blue-300 py-1.5 rounded-xl font-bold text-[11px] border border-blue-500/30">
-                    📁 Arquivar
-                  </button>
-                  <button onClick={() => handleDeleteOrder(o.id)} className="bg-red-500/20 hover:bg-red-500/30 text-red-400 px-3 py-1.5 rounded-xl font-bold text-[11px] border border-red-500/30">
-                    🗑️
-                  </button>
+                  <div className="flex space-x-2 pt-1 border-t border-gray-800/80">
+                    <button onClick={() => handlePrintOrder(o)} className="flex-1 bg-gray-900 hover:bg-gray-800 text-gray-300 py-1.5 rounded-xl font-bold text-[11px] border border-gray-800">
+                      🖨️ Etiqueta
+                    </button>
+                    <button onClick={() => handleArchiveOrder(o.id)} className="flex-1 bg-blue-500/20 hover:bg-blue-500/30 text-blue-300 py-1.5 rounded-xl font-bold text-[11px] border border-blue-500/30">
+                      📁 Arquivar
+                    </button>
+                    <button onClick={() => handleDeleteOrder(o.id)} className="bg-red-500/20 hover:bg-red-500/30 text-red-400 px-3 py-1.5 rounded-xl font-bold text-[11px] border border-red-500/30">
+                      🗑️
+                    </button>
+                  </div>
                 </div>
-              </div>
-            ))
+              );
+            })
           )}
         </div>
 
