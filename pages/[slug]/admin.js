@@ -50,7 +50,9 @@ export default function AdminTenant() {
     width_cm: '15',
     height_cm: '10',
     length_cm: '20',
-    stock: ''
+    stock: '',
+    is_digital: false,
+    download_url: ''
   });
   const [editingProduct, setEditingProduct] = useState(null);
   const [editingCategory, setEditingCategory] = useState(null);
@@ -277,6 +279,10 @@ export default function AdminTenant() {
       return alert("Selecione uma categoria válida antes de salvar!");
     }
 
+    if (newProd.is_digital && !newProd.download_url.trim()) {
+      return alert("Insira o link de download do produto digital!");
+    }
+
     const formattedPrice = parsePrice(newProd.price);
     const formattedOrigPrice = newProd.original_price ? parsePrice(newProd.original_price) : null;
     const mainImage = newProd.image || (newProd.images_json && newProd.images_json[0]) || 'https://images.unsplash.com/photo-1521572267360-ee0c2909d518?w=300&auto=format&fit=crop&q=80';
@@ -294,10 +300,12 @@ export default function AdminTenant() {
       image: mainImage,
       images_json: newProd.images_json || [mainImage],
       variations_json: newProd.variations_json || [],
-      weight_kg: parsePrice(newProd.weight_kg, 0.3),
-      width_cm: parsePrice(newProd.width_cm, 15),
-      height_cm: parsePrice(newProd.height_cm, 10),
-      length_cm: parsePrice(newProd.length_cm, 20),
+      is_digital: newProd.is_digital || false,
+      download_url: newProd.is_digital ? newProd.download_url.trim() : '',
+      weight_kg: newProd.is_digital ? 0 : parsePrice(newProd.weight_kg, 0.3),
+      width_cm: newProd.is_digital ? 0 : parsePrice(newProd.width_cm, 15),
+      height_cm: newProd.is_digital ? 0 : parsePrice(newProd.height_cm, 10),
+      length_cm: newProd.is_digital ? 0 : parsePrice(newProd.length_cm, 20),
       stock: stockVal,
       active: autoActive
     }]);
@@ -319,7 +327,9 @@ export default function AdminTenant() {
         width_cm: '15',
         height_cm: '10',
         length_cm: '20',
-        stock: ''
+        stock: '',
+        is_digital: false,
+        download_url: ''
       });
       fetchData();
     }
@@ -327,6 +337,11 @@ export default function AdminTenant() {
 
   const handleUpdateProduct = async (e) => {
     e.preventDefault();
+
+    if (editingProduct.is_digital && !editingProduct.download_url?.trim()) {
+      return alert("Insira o link de download do produto digital!");
+    }
+
     const formattedPrice = parsePrice(editingProduct.price);
     const formattedOrigPrice = editingProduct.original_price ? parsePrice(editingProduct.original_price) : null;
     const mainImage = editingProduct.image || (editingProduct.images_json && editingProduct.images_json[0]) || '';
@@ -343,10 +358,12 @@ export default function AdminTenant() {
       image: mainImage,
       images_json: editingProduct.images_json || [mainImage],
       variations_json: editingProduct.variations_json || [],
-      weight_kg: parsePrice(editingProduct.weight_kg, 0.3),
-      width_cm: parsePrice(editingProduct.width_cm, 15),
-      height_cm: parsePrice(editingProduct.height_cm, 10),
-      length_cm: parsePrice(editingProduct.length_cm, 20),
+      is_digital: editingProduct.is_digital || false,
+      download_url: editingProduct.is_digital ? (editingProduct.download_url || '').trim() : '',
+      weight_kg: editingProduct.is_digital ? 0 : parsePrice(editingProduct.weight_kg, 0.3),
+      width_cm: editingProduct.is_digital ? 0 : parsePrice(editingProduct.width_cm, 15),
+      height_cm: editingProduct.is_digital ? 0 : parsePrice(editingProduct.height_cm, 10),
+      length_cm: editingProduct.is_digital ? 0 : parsePrice(editingProduct.length_cm, 20),
       stock: stockVal,
       active: autoActive
     }).eq('id', editingProduct.id);
@@ -585,7 +602,7 @@ export default function AdminTenant() {
           <section className="bg-gray-900 p-5 rounded-3xl border border-gray-800 space-y-4 shadow-xl">
             <h3 className="font-bold text-sm text-blue-400">➕ Cadastrar Novo Produto</h3>
             <form onSubmit={handleAddProduct} className="space-y-3">
-              <input type="text" placeholder="Nome do Produto (Ex: Sérum Facial, Camisa Oversized, Vaso Decorativo)" value={newProd.name} className="w-full bg-gray-950 border border-gray-800 p-3 rounded-xl text-xs text-white focus:outline-none" onChange={(e) => setNewProd({ ...newProd, name: e.target.value })} />
+              <input type="text" placeholder="Nome do Produto (Ex: E-book Guia Prático, Camisa Oversized, Curso em Vídeo)" value={newProd.name} className="w-full bg-gray-950 border border-gray-800 p-3 rounded-xl text-xs text-white focus:outline-none" onChange={(e) => setNewProd({ ...newProd, name: e.target.value })} />
               <input type="text" placeholder="Descrição detalhada do produto" value={newProd.description} className="w-full bg-gray-950 border border-gray-800 p-3 rounded-xl text-xs text-white focus:outline-none" onChange={(e) => setNewProd({ ...newProd, description: e.target.value })} />
               
               <div className="grid grid-cols-4 gap-2">
@@ -615,26 +632,52 @@ export default function AdminTenant() {
                 </div>
               </div>
 
-              <div className="bg-gray-950 p-3.5 rounded-2xl border border-gray-800 space-y-2">
-                <label className="text-xs font-bold text-orange-400 block">📦 Peso e Dimensões da Caixa/Embalagem (Para Frete Nacional por CEP)</label>
-                <div className="grid grid-cols-4 gap-2 text-xs">
+              {/* CHAVE SELETORA E CAMPOS DIGITAIS VS FÍSICOS */}
+              <div className="bg-gray-950 p-3.5 rounded-2xl border border-gray-800 space-y-3">
+                <label className="flex items-center space-x-2 cursor-pointer">
+                  <input 
+                    type="checkbox" 
+                    checked={newProd.is_digital} 
+                    onChange={(e) => setNewProd({ ...newProd, is_digital: e.target.checked })} 
+                    className="w-4 h-4 accent-blue-500 rounded cursor-pointer"
+                  />
+                  <span className="text-xs font-bold text-blue-400">⚡ Produto 100% Digital (E-book, Curso, Arquivo - Sem Frete)</span>
+                </label>
+
+                {newProd.is_digital ? (
                   <div>
-                    <label className="text-[10px] text-gray-400 block mb-1">Peso (kg):</label>
-                    <input type="text" placeholder="0.3" value={newProd.weight_kg} onChange={(e) => setNewProd({ ...newProd, weight_kg: e.target.value })} className="w-full bg-gray-900 border border-gray-800 p-2 rounded-xl text-xs text-white focus:outline-none" />
+                    <label className="text-[10px] text-gray-400 block mb-1">Link do Arquivo / Download (Google Drive, Dropbox, Hotmart, etc):</label>
+                    <input 
+                      type="text" 
+                      placeholder="https://drive.google.com/file/d/..." 
+                      value={newProd.download_url} 
+                      onChange={(e) => setNewProd({ ...newProd, download_url: e.target.value })} 
+                      className="w-full bg-gray-900 border border-gray-800 p-2.5 rounded-xl text-xs text-white focus:outline-none"
+                    />
                   </div>
-                  <div>
-                    <label className="text-[10px] text-gray-400 block mb-1">Largura (cm):</label>
-                    <input type="text" placeholder="15" value={newProd.width_cm} onChange={(e) => setNewProd({ ...newProd, width_cm: e.target.value })} className="w-full bg-gray-900 border border-gray-800 p-2 rounded-xl text-xs text-white focus:outline-none" />
+                ) : (
+                  <div className="space-y-2">
+                    <label className="text-xs font-bold text-orange-400 block">📦 Peso e Dimensões da Caixa/Embalagem (Para Frete Nacional por CEP)</label>
+                    <div className="grid grid-cols-4 gap-2 text-xs">
+                      <div>
+                        <label className="text-[10px] text-gray-400 block mb-1">Peso (kg):</label>
+                        <input type="text" placeholder="0.3" value={newProd.weight_kg} onChange={(e) => setNewProd({ ...newProd, weight_kg: e.target.value })} className="w-full bg-gray-900 border border-gray-800 p-2 rounded-xl text-xs text-white focus:outline-none" />
+                      </div>
+                      <div>
+                        <label className="text-[10px] text-gray-400 block mb-1">Largura (cm):</label>
+                        <input type="text" placeholder="15" value={newProd.width_cm} onChange={(e) => setNewProd({ ...newProd, width_cm: e.target.value })} className="w-full bg-gray-900 border border-gray-800 p-2 rounded-xl text-xs text-white focus:outline-none" />
+                      </div>
+                      <div>
+                        <label className="text-[10px] text-gray-400 block mb-1">Altura (cm):</label>
+                        <input type="text" placeholder="10" value={newProd.height_cm} onChange={(e) => setNewProd({ ...newProd, height_cm: e.target.value })} className="w-full bg-gray-900 border border-gray-800 p-2 rounded-xl text-xs text-white focus:outline-none" />
+                      </div>
+                      <div>
+                        <label className="text-[10px] text-gray-400 block mb-1">Compr. (cm):</label>
+                        <input type="text" placeholder="20" value={newProd.length_cm} onChange={(e) => setNewProd({ ...newProd, length_cm: e.target.value })} className="w-full bg-gray-900 border border-gray-800 p-2 rounded-xl text-xs text-white focus:outline-none" />
+                      </div>
+                    </div>
                   </div>
-                  <div>
-                    <label className="text-[10px] text-gray-400 block mb-1">Altura (cm):</label>
-                    <input type="text" placeholder="10" value={newProd.height_cm} onChange={(e) => setNewProd({ ...newProd, height_cm: e.target.value })} className="w-full bg-gray-900 border border-gray-800 p-2 rounded-xl text-xs text-white focus:outline-none" />
-                  </div>
-                  <div>
-                    <label className="text-[10px] text-gray-400 block mb-1">Compr. (cm):</label>
-                    <input type="text" placeholder="20" value={newProd.length_cm} onChange={(e) => setNewProd({ ...newProd, length_cm: e.target.value })} className="w-full bg-gray-900 border border-gray-800 p-2 rounded-xl text-xs text-white focus:outline-none" />
-                  </div>
-                </div>
+                )}
               </div>
 
               <div className="bg-gray-950 p-3.5 rounded-2xl border border-gray-800 space-y-3">
@@ -723,7 +766,7 @@ export default function AdminTenant() {
             {products.map((item) => {
               const hasPromo = item.original_price && Number(item.original_price) > Number(item.price);
               const discPercent = hasPromo ? Math.round(((Number(item.original_price) - Number(item.price)) / Number(item.original_price)) * 100) : 0;
-              const isOutOfStock = item.stock !== null && item.stock <= 0;
+              const isOutOfStock = !item.is_digital && item.stock !== null && item.stock <= 0;
 
               return (
                 <div key={item.id} className="bg-gray-900 p-3.5 rounded-2xl border border-gray-800 flex justify-between items-center shadow-md">
@@ -732,13 +775,14 @@ export default function AdminTenant() {
                     <div>
                       <div className="flex items-center space-x-2">
                         <span className={`font-bold text-xs block ${!item.active ? 'line-through text-gray-500' : 'text-white'}`}>{item.name}</span>
+                        {item.is_digital && <span className="bg-blue-500/20 text-blue-400 border border-blue-500/30 text-[9px] font-bold px-1.5 py-0.5 rounded-md">⚡ Digital</span>}
                         {hasPromo && <span className="bg-red-500/20 text-red-400 border border-red-500/30 text-[9px] font-bold px-1.5 py-0.5 rounded-md">🔥 -{discPercent}% OFF</span>}
                         {isOutOfStock && <span className="bg-red-900/40 text-red-400 border border-red-700/50 text-[9px] font-bold px-1.5 py-0.5 rounded-md">❌ Esgotado</span>}
                       </div>
                       <div className="flex items-center space-x-3 text-xs mt-0.5">
                         <span className="text-blue-400 font-bold">R$ {Number(item.price).toFixed(2)}</span>
                         {hasPromo && <span className="text-[10px] text-gray-500 line-through">R$ {Number(item.original_price).toFixed(2)}</span>}
-                        {item.stock !== null && (
+                        {!item.is_digital && item.stock !== null && (
                           <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${item.stock > 0 ? 'bg-green-500/20 text-green-400' : 'bg-red-500/20 text-red-400'}`}>
                             📦 Estoque: {item.stock} un.
                           </span>
@@ -748,7 +792,7 @@ export default function AdminTenant() {
                   </div>
 
                   <div className="flex items-center space-x-1.5">
-                    <button onClick={() => setEditingProduct({ ...item, images_json: item.images_json || (item.image ? [item.image] : []), variations_json: item.variations_json || [] })} className="text-xs bg-blue-600/20 text-blue-400 px-3 py-1.5 rounded-xl font-bold border border-blue-500/30">✏️ Editar</button>
+                    <button onClick={() => setEditingProduct({ ...item, images_json: item.images_json || (item.image ? [item.image] : []), variations_json: item.variations_json || [], is_digital: item.is_digital || false, download_url: item.download_url || '' })} className="text-xs bg-blue-600/20 text-blue-400 px-3 py-1.5 rounded-xl font-bold border border-blue-500/30">✏️ Editar</button>
                     <button onClick={async () => { await supabase.from('products').update({ active: !item.active }).eq('id', item.id); fetchData(); }} className={`text-[10px] font-bold px-2.5 py-1.5 rounded-xl ${item.active ? 'bg-green-500/20 text-green-400 border border-green-500/30' : 'bg-yellow-500/20 text-yellow-400 border border-yellow-500/30'}`}>{item.active ? 'Ativo' : 'Pausado'}</button>
                     <button onClick={async () => { if (confirm("Deseja excluir este produto?")) { await supabase.from('products').delete().eq('id', item.id); fetchData(); } }} className="text-xs bg-red-500/20 text-red-400 px-2.5 py-1.5 rounded-xl font-bold border border-red-500/30">🗑</button>
                   </div>
@@ -1014,7 +1058,7 @@ export default function AdminTenant() {
             <button
               onClick={() => window.print()}
               className="bg-blue-600 hover:bg-blue-700 text-white font-bold px-4 py-2.5 rounded-xl text-xs transition shadow flex items-center space-x-1">
-              <span>𖤂 Imprimir Relatório</span>
+              <span>🖨️ Imprimir Relatório</span>
             </button>
           </div>
 
@@ -1098,7 +1142,7 @@ export default function AdminTenant() {
           <section className="bg-gray-900 p-5 rounded-3xl border border-gray-800 space-y-4 shadow-xl">
             <h3 className="font-bold text-sm text-blue-400">🏷️ Nova Categoria / Coleção</h3>
             <form onSubmit={handleAddCategory} className="flex space-x-2">
-              <input type="text" placeholder="Nome (Ex: Lançamentos, Skincare, Eletrônicos, Polos)" value={newCatName} className="flex-1 bg-gray-950 border border-gray-800 p-3 rounded-xl text-xs text-white focus:outline-none" onChange={(e) => setNewCatName(e.target.value)} />
+              <input type="text" placeholder="Nome (Ex: Lançamentos, Infoprodutos, Eletrônicos, Polos)" value={newCatName} className="flex-1 bg-gray-950 border border-gray-800 p-3 rounded-xl text-xs text-white focus:outline-none" onChange={(e) => setNewCatName(e.target.value)} />
               <button type="submit" className="bg-green-600 hover:bg-green-700 text-white font-bold px-5 py-3 rounded-xl text-xs transition">Adicionar</button>
             </form>
           </section>
@@ -1138,6 +1182,7 @@ export default function AdminTenant() {
                   <option value="beauty">💄 Produtos de Beleza & Cosméticos</option>
                   <option value="home">🏡 Casa, Decoração & Utilidades</option>
                   <option value="electronics">🔌 Eletrônicos & Acessórios</option>
+                  <option value="digital">⚡ Produtos Digitais & Infoprodutos</option>
                   <option value="general">📦 E-commerce Geral / Multi-produtos</option>
                 </select>
               </div>
@@ -1267,7 +1312,7 @@ export default function AdminTenant() {
         </div>
       )}
 
-      {/* MODAIS DE EDIÇÃO MANTIDOS */}
+      {/* MODAIS DE EDIÇÃO */}
       {editingNeigh && (
         <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 p-4">
           <form onSubmit={handleUpdateNeigh} className="bg-gray-900 w-full max-w-sm rounded-3xl p-5 border border-blue-500/40 space-y-3 shadow-2xl">
@@ -1323,26 +1368,52 @@ export default function AdminTenant() {
               {categories.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
             </select>
 
-            <div className="bg-gray-950 p-3.5 rounded-2xl border border-gray-800 space-y-2">
-              <label className="text-xs font-bold text-orange-400 block">📦 Peso e Dimensões (Para Frete Nacional)</label>
-              <div className="grid grid-cols-4 gap-2 text-xs">
+            {/* SELETOR DIGITAL NO MODAL DE EDIÇÃO */}
+            <div className="bg-gray-950 p-3.5 rounded-2xl border border-gray-800 space-y-3">
+              <label className="flex items-center space-x-2 cursor-pointer">
+                <input 
+                  type="checkbox" 
+                  checked={editingProduct.is_digital || false} 
+                  onChange={(e) => setEditingProduct({ ...editingProduct, is_digital: e.target.checked })} 
+                  className="w-4 h-4 accent-blue-500 rounded cursor-pointer"
+                />
+                <span className="text-xs font-bold text-blue-400">⚡ Produto 100% Digital (Sem Frete)</span>
+              </label>
+
+              {editingProduct.is_digital ? (
                 <div>
-                  <label className="text-[10px] text-gray-400 block mb-1">Peso (kg):</label>
-                  <input type="text" value={editingProduct.weight_kg ?? '0.3'} onChange={(e) => setEditingProduct({ ...editingProduct, weight_kg: e.target.value })} className="w-full bg-gray-900 border border-gray-800 p-2 rounded-xl text-xs text-white focus:outline-none" />
+                  <label className="text-[10px] text-gray-400 block mb-1">Link do Arquivo / Download:</label>
+                  <input 
+                    type="text" 
+                    placeholder="https://drive.google.com/file/d/..." 
+                    value={editingProduct.download_url || ''} 
+                    onChange={(e) => setEditingProduct({ ...editingProduct, download_url: e.target.value })} 
+                    className="w-full bg-gray-900 border border-gray-800 p-2.5 rounded-xl text-xs text-white focus:outline-none"
+                  />
                 </div>
-                <div>
-                  <label className="text-[10px] text-gray-400 block mb-1">Largura (cm):</label>
-                  <input type="text" value={editingProduct.width_cm ?? '15'} onChange={(e) => setEditingProduct({ ...editingProduct, width_cm: e.target.value })} className="w-full bg-gray-900 border border-gray-800 p-2 rounded-xl text-xs text-white focus:outline-none" />
+              ) : (
+                <div className="space-y-2">
+                  <label className="text-xs font-bold text-orange-400 block">📦 Peso e Dimensões (Para Frete Nacional)</label>
+                  <div className="grid grid-cols-4 gap-2 text-xs">
+                    <div>
+                      <label className="text-[10px] text-gray-400 block mb-1">Peso (kg):</label>
+                      <input type="text" value={editingProduct.weight_kg ?? '0.3'} onChange={(e) => setEditingProduct({ ...editingProduct, weight_kg: e.target.value })} className="w-full bg-gray-900 border border-gray-800 p-2 rounded-xl text-xs text-white focus:outline-none" />
+                    </div>
+                    <div>
+                      <label className="text-[10px] text-gray-400 block mb-1">Largura (cm):</label>
+                      <input type="text" value={editingProduct.width_cm ?? '15'} onChange={(e) => setEditingProduct({ ...editingProduct, width_cm: e.target.value })} className="w-full bg-gray-900 border border-gray-800 p-2 rounded-xl text-xs text-white focus:outline-none" />
+                    </div>
+                    <div>
+                      <label className="text-[10px] text-gray-400 block mb-1">Altura (cm):</label>
+                      <input type="text" value={editingProduct.height_cm ?? '10'} onChange={(e) => setEditingProduct({ ...editingProduct, height_cm: e.target.value })} className="w-full bg-gray-900 border border-gray-800 p-2 rounded-xl text-xs text-white focus:outline-none" />
+                    </div>
+                    <div>
+                      <label className="text-[10px] text-gray-400 block mb-1">Compr. (cm):</label>
+                      <input type="text" value={editingProduct.length_cm ?? '20'} onChange={(e) => setEditingProduct({ ...editingProduct, length_cm: e.target.value })} className="w-full bg-gray-900 border border-gray-800 p-2 rounded-xl text-xs text-white focus:outline-none" />
+                    </div>
+                  </div>
                 </div>
-                <div>
-                  <label className="text-[10px] text-gray-400 block mb-1">Altura (cm):</label>
-                  <input type="text" value={editingProduct.height_cm ?? '10'} onChange={(e) => setEditingProduct({ ...editingProduct, height_cm: e.target.value })} className="w-full bg-gray-900 border border-gray-800 p-2 rounded-xl text-xs text-white focus:outline-none" />
-                </div>
-                <div>
-                  <label className="text-[10px] text-gray-400 block mb-1">Compr. (cm):</label>
-                  <input type="text" value={editingProduct.length_cm ?? '20'} onChange={(e) => setEditingProduct({ ...editingProduct, length_cm: e.target.value })} className="w-full bg-gray-900 border border-gray-800 p-2 rounded-xl text-xs text-white focus:outline-none" />
-                </div>
-              </div>
+              )}
             </div>
 
             <div className="bg-gray-950 p-3.5 rounded-2xl border border-gray-800 space-y-3">
