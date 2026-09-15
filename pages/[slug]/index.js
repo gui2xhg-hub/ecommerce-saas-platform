@@ -13,6 +13,9 @@ export default function EcommerceCliente() {
   const [selectedCat, setSelectedCat] = useState('ALL');
   const [loading, setLoading] = useState(true);
 
+  // CARROSSEL DE BANNERS PROMOCIONAIS
+  const [currentBannerIndex, setCurrentBannerIndex] = useState(0);
+
   // LISTA DE TAMANHOS DE ROUPA PADRÃO (FALLBACK)
   const DEFAULT_FASHION_SIZES = ['P', 'M', 'G', 'GG', 'XG'];
 
@@ -96,6 +99,17 @@ export default function EcommerceCliente() {
       if (interval) clearInterval(interval);
     };
   }, [showPixModal, pixPaymentId, pixStatus, tenant, currentOrderId]);
+
+  // CARROSSEL AUTOMÁTICO DE BANNERS
+  const promoBannerList = tenant?.promo_banners ? tenant.promo_banners.split(',').map(b => b.trim()).filter(Boolean) : [];
+
+  useEffect(() => {
+    if (promoBannerList.length <= 1) return;
+    const timer = setInterval(() => {
+      setCurrentBannerIndex((prev) => (prev + 1) % promoBannerList.length);
+    }, 4000);
+    return () => clearInterval(timer);
+  }, [promoBannerList.length]);
 
   const fetchTenantData = async () => {
     setLoading(true);
@@ -444,8 +458,6 @@ export default function EcommerceCliente() {
         : products.filter(p => String(p.category_id) === String(selectedCat))
       );
 
-  const promoBannerList = tenant?.promo_banners ? tenant.promo_banners.split(',').map(b => b.trim()).filter(Boolean) : [];
-
   const handleFinishOrder = async (e) => {
     e.preventDefault();
     if (cart.length === 0) return alert("Seu carrinho está vazio!");
@@ -630,155 +642,217 @@ export default function EcommerceCliente() {
   const selectedProductHasPromo = selectedProduct && selectedProduct.original_price && Number(selectedProduct.original_price) > Number(selectedProduct.price);
   const selectedProductSavings = selectedProductHasPromo ? (Number(selectedProduct.original_price) - Number(selectedProduct.price)) : 0;
 
+  const cleanTenantWhatsapp = tenant?.whatsapp ? tenant.whatsapp.replace(/\D/g, '') : '';
+
   return (
-    <div className="min-h-screen font-sans pb-24 max-w-md mx-auto transition-colors duration-300" style={{ backgroundColor: bgColor, color: textColor }}>
+    <div className="min-h-screen font-sans pb-24 max-w-md mx-auto transition-colors duration-300 relative flex flex-col justify-between" style={{ backgroundColor: bgColor, color: textColor }}>
       
-      {/* BARRA DE AVISOS E COMUNICADOS */}
-      {tenant.custom_message && (
-        <div className="bg-gradient-to-r from-orange-600 via-amber-600 to-orange-500 text-white text-[11px] font-bold py-2.5 px-4 text-center shadow-md flex items-center justify-center space-x-2">
-          <span>📢 {tenant.custom_message}</span>
-        </div>
-      )}
-
-      {/* CAPA DA LOJA */}
-      <div className="relative h-36 bg-gray-900 border-b border-white/10">
-        <img src={tenant.banner_url || 'https://images.unsplash.com/photo-1441986300917-64674bd600d8?w=800&auto=format&fit=crop&q=80'} alt="Capa da Loja" className="w-full h-full object-cover opacity-50" />
-        
-        <div className="absolute top-3 right-3 flex items-center space-x-2 z-10">
-          <button
-            onClick={handleOpenMyOrders}
-            className="bg-gray-900/90 hover:bg-black text-white font-bold text-[10px] px-3 py-1.5 rounded-full border border-white/20 shadow-lg transition flex items-center space-x-1">
-            <span>📦 Meus Pedidos</span>
-          </button>
-
-          {tenant.instagram_url && (
-            <a
-              href={tenant.instagram_url.startsWith('http') ? tenant.instagram_url : `https://${tenant.instagram_url}`}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="bg-gradient-to-r from-purple-600 via-pink-600 to-orange-500 text-white font-bold text-[10px] px-3 py-1.5 rounded-full shadow-lg transition flex items-center space-x-1 hover:opacity-90">
-              <span>📸 Instagram</span>
-            </a>
-          )}
-        </div>
-
-        <div className="absolute -bottom-5 left-4 flex items-center space-x-3">
-          <img src={tenant.logo_url || 'https://images.unsplash.com/photo-1522335789203-aabd1fc54bc9?w=150&auto=format&fit=crop&q=80'} alt="Logo" className="w-16 h-16 rounded-full border-2 border-black/40 object-cover bg-gray-800 shadow-lg" />
-          <div className="pt-4">
-            <h1 className="font-bold text-lg leading-tight" style={{ color: textColor }}>{tenant.name}</h1>
-            <p className="text-[11px] opacity-70">🛍️ Catálogo Online & E-commerce</p>
+      <div>
+        {/* BARRA DE AVISOS E COMUNICADOS */}
+        {tenant.custom_message && (
+          <div className="bg-gradient-to-r from-orange-600 via-amber-600 to-orange-500 text-white text-[11px] font-bold py-2.5 px-4 text-center shadow-md flex items-center justify-center space-x-2">
+            <span>📢 {tenant.custom_message}</span>
           </div>
-        </div>
-      </div>
+        )}
 
-      {/* BANNERS PROMOCIONAIS */}
-      {promoBannerList.length > 0 && (
-        <div className="mt-8 px-4">
-          <div className="flex space-x-3 overflow-x-auto pb-2 scrollbar-none">
-            {promoBannerList.map((bannerUrl, idx) => (
-              <img key={idx} src={bannerUrl} alt={`Destaque ${idx + 1}`} className="w-72 h-32 rounded-2xl object-cover border border-white/10 shrink-0 shadow-md" />
-            ))}
-          </div>
-        </div>
-      )}
-
-      {/* CATEGORIAS + ABA DE PROMOÇÕES */}
-      <div className={`${promoBannerList.length > 0 ? 'mt-4' : 'mt-8'} px-4`}>
-        <div className="flex space-x-2 overflow-x-auto pb-2 scrollbar-none">
-          <button
-            onClick={() => setSelectedCat('ALL')}
-            style={{ 
-              backgroundColor: selectedCat === 'ALL' ? primaryColor : cardColor,
-              color: selectedCat === 'ALL' ? btnTextColor : textColor
-            }}
-            className="px-3.5 py-1.5 rounded-full text-xs font-bold whitespace-nowrap border border-white/10 transition">
-            Todos
-          </button>
-
-          {promoProductsCount > 0 && (
+        {/* CAPA DA LOJA */}
+        <div className="relative h-36 bg-gray-900 border-b border-white/10">
+          <img src={tenant.banner_url || 'https://images.unsplash.com/photo-1441986300917-64674bd600d8?w=800&auto=format&fit=crop&q=80'} alt="Capa da Loja" className="w-full h-full object-cover opacity-50" />
+          
+          <div className="absolute top-3 right-3 flex items-center space-x-2 z-10">
             <button
-              onClick={() => setSelectedCat('OFFERS')}
-              className={`px-3.5 py-1.5 rounded-full text-xs font-bold whitespace-nowrap border transition flex items-center space-x-1 ${
-                selectedCat === 'OFFERS' 
-                  ? 'bg-gradient-to-r from-red-600 to-orange-500 text-white border-red-500 shadow-lg' 
-                  : 'bg-red-500/10 text-red-400 border-red-500/30 hover:bg-red-500/20'
-              }`}>
-              <span>🔥 Promoções ({promoProductsCount})</span>
+              onClick={handleOpenMyOrders}
+              className="bg-gray-900/90 hover:bg-black text-white font-bold text-[10px] px-3 py-1.5 rounded-full border border-white/20 shadow-lg transition flex items-center space-x-1">
+              <span>📦 Meus Pedidos</span>
             </button>
-          )}
 
-          {categories.map(c => {
-            const isSelected = String(selectedCat) === String(c.id);
-            return (
+            {tenant.instagram_url && (
+              <a
+                href={tenant.instagram_url.startsWith('http') ? tenant.instagram_url : `https://${tenant.instagram_url}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="bg-gradient-to-r from-purple-600 via-pink-600 to-orange-500 text-white font-bold text-[10px] px-3 py-1.5 rounded-full shadow-lg transition flex items-center space-x-1 hover:opacity-90">
+                <span>📸 Instagram</span>
+              </a>
+            )}
+          </div>
+
+          <div className="absolute -bottom-5 left-4 flex items-center space-x-3">
+            <img src={tenant.logo_url || 'https://images.unsplash.com/photo-1522335789203-aabd1fc54bc9?w=150&auto=format&fit=crop&q=80'} alt="Logo" className="w-16 h-16 rounded-full border-2 border-black/40 object-cover bg-gray-800 shadow-lg" />
+            <div className="pt-4">
+              <h1 className="font-bold text-lg leading-tight" style={{ color: textColor }}>{tenant.name}</h1>
+              <p className="text-[11px] opacity-70">🛍️ Catálogo Online & E-commerce</p>
+            </div>
+          </div>
+        </div>
+
+        {/* CARROSSEL AUTOMÁTICO DE BANNERS PROMOCIONAIS */}
+        {promoBannerList.length > 0 && (
+          <div className="mt-8 px-4">
+            <div className="relative rounded-2xl overflow-hidden border border-white/10 shadow-lg group">
+              <div 
+                className="flex transition-transform duration-500 ease-out"
+                style={{ transform: `translateX(-${currentBannerIndex * 100}%)` }}>
+                {promoBannerList.map((bannerUrl, idx) => (
+                  <img 
+                    key={idx} 
+                    src={bannerUrl} 
+                    alt={`Destaque ${idx + 1}`} 
+                    className="w-full h-36 object-cover shrink-0" 
+                  />
+                ))}
+              </div>
+
+              {promoBannerList.length > 1 && (
+                <div className="absolute bottom-2 inset-x-0 flex justify-center space-x-1.5 z-10">
+                  {promoBannerList.map((_, idx) => (
+                    <button
+                      key={idx}
+                      onClick={() => setCurrentBannerIndex(idx)}
+                      style={{ backgroundColor: currentBannerIndex === idx ? primaryColor : 'rgba(255,255,255,0.4)' }}
+                      className={`h-1.5 rounded-full transition-all ${currentBannerIndex === idx ? 'w-5' : 'w-1.5'}`}
+                    />
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* CATEGORIAS + ABA DE PROMOÇÕES */}
+        <div className={`${promoBannerList.length > 0 ? 'mt-4' : 'mt-8'} px-4`}>
+          <div className="flex space-x-2 overflow-x-auto pb-2 scrollbar-none">
+            <button
+              onClick={() => setSelectedCat('ALL')}
+              style={{ 
+                backgroundColor: selectedCat === 'ALL' ? primaryColor : cardColor,
+                color: selectedCat === 'ALL' ? btnTextColor : textColor
+              }}
+              className="px-3.5 py-1.5 rounded-full text-xs font-bold whitespace-nowrap border border-white/10 transition">
+              Todos
+            </button>
+
+            {promoProductsCount > 0 && (
               <button
-                key={c.id}
-                onClick={() => setSelectedCat(c.id)}
-                style={{ 
-                  backgroundColor: isSelected ? primaryColor : cardColor,
-                  color: isSelected ? btnTextColor : textColor
-                }}
-                className="px-3.5 py-1.5 rounded-full text-xs font-bold whitespace-nowrap border border-white/10 transition">
-                {c.name}
+                onClick={() => setSelectedCat('OFFERS')}
+                className={`px-3.5 py-1.5 rounded-full text-xs font-bold whitespace-nowrap border transition flex items-center space-x-1 ${
+                  selectedCat === 'OFFERS' 
+                    ? 'bg-gradient-to-r from-red-600 to-orange-500 text-white border-red-500 shadow-lg' 
+                    : 'bg-red-500/10 text-red-400 border-red-500/30 hover:bg-red-500/20'
+                }`}>
+                <span>🔥 Promoções ({promoProductsCount})</span>
               </button>
+            )}
+
+            {categories.map(c => {
+              const isSelected = String(selectedCat) === String(c.id);
+              return (
+                <button
+                  key={c.id}
+                  onClick={() => setSelectedCat(c.id)}
+                  style={{ 
+                    backgroundColor: isSelected ? primaryColor : cardColor,
+                    color: isSelected ? btnTextColor : textColor
+                  }}
+                  className="px-3.5 py-1.5 rounded-full text-xs font-bold whitespace-nowrap border border-white/10 transition">
+                  {c.name}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
+        {/* GRID DE PRODUTOS */}
+        <div className="mt-4 px-4 grid grid-cols-2 gap-3">
+          {filteredProducts.map(p => {
+            const hasPromo = p.original_price && Number(p.original_price) > Number(p.price);
+            const discPercent = hasPromo ? Math.round(((Number(p.original_price) - Number(p.price)) / Number(p.original_price)) * 100) : 0;
+
+            return (
+              <div 
+                key={p.id} 
+                onClick={() => handleOpenProductModal(p)}
+                style={{ backgroundColor: cardColor }} 
+                className="p-3 rounded-2xl border border-white/10 flex flex-col justify-between cursor-pointer hover:border-white/20 transition relative group">
+                
+                <div className="absolute top-2.5 right-2.5 z-10 flex flex-col items-end space-y-1">
+                  {hasPromo && (
+                    <span className="bg-gradient-to-r from-red-600 to-orange-500 text-white font-extrabold text-[9px] px-2 py-0.5 rounded-full shadow-lg border border-white/20 uppercase tracking-wider animate-pulse">
+                      -{discPercent}% OFF
+                    </span>
+                  )}
+                  {p.is_digital && (
+                    <span className="bg-blue-600/90 text-white font-extrabold text-[8px] px-2 py-0.5 rounded-full shadow border border-blue-400/30 uppercase tracking-wider">
+                      ⚡ Digital
+                    </span>
+                  )}
+                </div>
+
+                <div>
+                  <div className="relative overflow-hidden rounded-xl mb-2">
+                    <img src={p.image || 'https://images.unsplash.com/photo-1523275335684-37898b6baf30?w=300&auto=format&fit=crop&q=80'} alt={p.name} className="w-full h-28 object-cover border border-white/10 bg-gray-800" />
+                  </div>
+                  <h3 className="font-bold text-xs line-clamp-2 leading-snug h-8" style={{ color: textColor }}>{p.name}</h3>
+                  <p className="text-[10px] opacity-60 line-clamp-2 h-7 mt-1">{p.description}</p>
+                </div>
+
+                <div className="mt-2 pt-2 border-t border-white/10 flex justify-between items-end">
+                  <div>
+                    {hasPromo && (
+                      <span className="text-[10px] opacity-50 line-through block leading-tight">
+                        R$ {Number(p.original_price).toFixed(2)}
+                      </span>
+                    )}
+                    <span className={`font-bold text-xs block ${hasPromo ? 'text-red-400 font-extrabold' : ''}`} style={{ color: hasPromo ? '#f87171' : primaryColor }}>
+                      R$ {Number(p.price).toFixed(2)}
+                    </span>
+                  </div>
+
+                  <button style={{ backgroundColor: primaryColor, color: btnTextColor }} className="px-2 py-1 rounded-lg text-[10px] font-bold transition shadow shrink-0">
+                    Ver
+                  </button>
+                </div>
+              </div>
             );
           })}
         </div>
       </div>
 
-      {/* GRID DE PRODUTOS */}
-      <div className="mt-4 px-4 grid grid-cols-2 gap-3">
-        {filteredProducts.map(p => {
-          const hasPromo = p.original_price && Number(p.original_price) > Number(p.price);
-          const discPercent = hasPromo ? Math.round(((Number(p.original_price) - Number(p.price)) / Number(p.original_price)) * 100) : 0;
+      {/* RODAPÉ PROFISSIONAL (FOOTER) */}
+      <footer className="mt-12 border-t border-white/10 pt-8 pb-12 px-4 text-center space-y-3 opacity-90">
+        <div className="flex justify-center items-center space-x-2">
+          <img src={tenant.logo_url || 'https://images.unsplash.com/photo-1522335789203-aabd1fc54bc9?w=150&auto=format&fit=crop&q=80'} alt="Logo" className="w-7 h-7 rounded-full object-cover border border-white/20" />
+          <span className="font-extrabold text-sm tracking-wide" style={{ color: textColor }}>{tenant.name}</span>
+        </div>
 
-          return (
-            <div 
-              key={p.id} 
-              onClick={() => handleOpenProductModal(p)}
-              style={{ backgroundColor: cardColor }} 
-              className="p-3 rounded-2xl border border-white/10 flex flex-col justify-between cursor-pointer hover:border-white/20 transition relative group">
-              
-              <div className="absolute top-2.5 right-2.5 z-10 flex flex-col items-end space-y-1">
-                {hasPromo && (
-                  <span className="bg-gradient-to-r from-red-600 to-orange-500 text-white font-extrabold text-[9px] px-2 py-0.5 rounded-full shadow-lg border border-white/20 uppercase tracking-wider animate-pulse">
-                    -{discPercent}% OFF
-                  </span>
-                )}
-                {p.is_digital && (
-                  <span className="bg-blue-600/90 text-white font-extrabold text-[8px] px-2 py-0.5 rounded-full shadow border border-blue-400/30 uppercase tracking-wider">
-                    ⚡ Digital
-                  </span>
-                )}
-              </div>
+        <p className="text-[11px] opacity-60 max-w-xs mx-auto leading-relaxed">
+          Atendimento de Seg. a Sáb. das {tenant.opening_time || '08:00'} às {tenant.closing_time || '18:00'}.
+        </p>
 
-              <div>
-                <div className="relative overflow-hidden rounded-xl mb-2">
-                  <img src={p.image || 'https://images.unsplash.com/photo-1523275335684-37898b6baf30?w=300&auto=format&fit=crop&q=80'} alt={p.name} className="w-full h-28 object-cover border border-white/10 bg-gray-800" />
-                </div>
-                <h3 className="font-bold text-xs line-clamp-2 leading-snug h-8" style={{ color: textColor }}>{p.name}</h3>
-                <p className="text-[10px] opacity-60 line-clamp-2 h-7 mt-1">{p.description}</p>
-              </div>
+        <div className="pt-2 border-t border-white/5 flex flex-col items-center space-y-1 text-[10px] opacity-50">
+          <p>© {new Date().getFullYear()} {tenant.name}. Todos os direitos reservados.</p>
+          <p className="font-medium tracking-wider">
+            Desenvolvido por <span className="text-orange-400 font-bold hover:underline cursor-pointer">SinergeMKT</span>
+          </p>
+        </div>
+      </footer>
 
-              <div className="mt-2 pt-2 border-t border-white/10 flex justify-between items-end">
-                <div>
-                  {hasPromo && (
-                    <span className="text-[10px] opacity-50 line-through block leading-tight">
-                      R$ {Number(p.original_price).toFixed(2)}
-                    </span>
-                  )}
-                  <span className={`font-bold text-xs block ${hasPromo ? 'text-red-400 font-extrabold' : ''}`} style={{ color: hasPromo ? '#f87171' : primaryColor }}>
-                    R$ {Number(p.price).toFixed(2)}
-                  </span>
-                </div>
-
-                <button style={{ backgroundColor: primaryColor, color: btnTextColor }} className="px-2 py-1 rounded-lg text-[10px] font-bold transition shadow shrink-0">
-                  Ver
-                </button>
-              </div>
-            </div>
-          );
-        })}
-      </div>
+      {/* ÍCONE FLUTUANTE DO WHATSAPP (FIXO NA TELA) */}
+      {cleanTenantWhatsapp && (
+        <a
+          href={`https://wa.me/${cleanTenantWhatsapp}?text=${encodeURIComponent("Olá! Vim pelo catálogo e gostaria de tirar uma dúvida.")}`}
+          target="_blank"
+          rel="noopener noreferrer"
+          style={{ bottom: cart.length > 0 ? '5.5rem' : '1.25rem' }}
+          className="fixed right-4 z-40 bg-[#25D366] text-white p-3.5 rounded-full shadow-2xl transition-all duration-300 hover:scale-110 flex items-center justify-center border-2 border-white/20 group">
+          <svg className="w-6 h-6 fill-current" viewBox="0 0 24 24">
+            <path d="M.057 24l1.687-6.163c-1.041-1.804-1.588-3.849-1.587-5.946.003-6.556 5.338-11.891 11.893-11.891 3.181.001 6.167 1.24 8.413 3.488 2.245 2.248 3.481 5.236 3.48 8.414-.003 6.557-5.338 11.892-11.893 11.892-1.99-.001-3.951-.5-5.688-1.448l-6.305 1.654zm6.597-3.807c1.676.995 3.276 1.591 5.392 1.592 5.448 0 9.886-4.434 9.889-9.885.002-5.462-4.415-9.89-9.881-9.892-5.452 0-9.887 4.434-9.889 9.884-.001 2.225.651 3.891 1.746 5.634l-.999 3.648 3.742-.981zm11.387-5.464c-.074-.124-.272-.198-.57-.347-.297-.149-1.758-.868-2.031-.967-.272-.099-.47-.149-.669.149-.198.297-.768.967-.941 1.165-.173.198-.347.223-.644.074-.297-.149-1.255-.462-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.297-.347.446-.521.151-.172.2-.296.3-.495.099-.198.05-.372-.025-.521-.075-.148-.669-1.611-.916-2.206-.242-.579-.487-.501-.669-.51l-.57-.01c-.198 0-.52.074-.792.372s-1.04 1.016-1.04 2.479 1.065 2.876 1.213 3.074c.149.198 2.095 3.2 5.076 4.487.709.306 1.263.489 1.694.626.712.226 1.36.194 1.872.118.571-.085 1.758-.719 2.006-1.413.248-.695.248-1.29.173-1.414z"/>
+          </svg>
+          <span className="absolute right-14 bg-black/80 text-white text-[10px] font-bold px-2.5 py-1 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap shadow-lg pointer-events-none">
+            Falar no WhatsApp
+          </span>
+        </a>
+      )}
 
       {/* BARRA DO CARRINHO FLUTUANTE */}
       {cart.length > 0 && (
