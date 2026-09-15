@@ -72,7 +72,7 @@ export default function FilaProducao() {
       }
     } catch (err) {
       setErrorMessage("Erro inesperado: " + err.message);
-    } font
+    } finally {
       setLoading(false);
     }
   };
