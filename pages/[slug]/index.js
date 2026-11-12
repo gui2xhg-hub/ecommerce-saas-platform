@@ -1,1410 +1,1435 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useRouter } from 'next/router';
-import Head from 'next/head';
 import { supabase } from '../../lib/supabase';
 
-// DATA DE HOJE NO FUSO DO APARELHO (antes usava UTC e, depois das 21h, virava "amanhã")
-const getTodayLocal = () => new Date().toLocaleDateString('sv-SE');
-
-// MONTA O NÚMERO DO WHATSAPP COM 55 SÓ QUANDO AINDA NÃO TEM
-const toWaNumber = (phone) => {
-  const clean = String(phone || '').replace(/\D/g, '');
-  if (!clean) return '';
-  return clean.length <= 11 ? `55${clean}` : clean;
-};
-
-// ERRO DEVOLVIDO PELO BANCO QUANDO O HORÁRIO JÁ FOI OCUPADO (trava anti-duplicidade)
-const isSlotTakenError = (error) => !!(error && String(error.message || '').includes('HORARIO_OCUPADO'));
-
-// FUNÇÃO AUXILIAR PARA FORMATAR MINUTOS EM HORAS E MINUTOS
-const formatDuration = (minutes) => {
-  const mins = Number(minutes) || 0;
-  if (mins <= 0) return '30 min';
-  if (mins < 60) return `${mins} min`;
-  
-  const hrs = Math.floor(mins / 60);
-  const remMins = mins % 60;
-  
-  if (remMins === 0) return `${hrs}h`;
-  return `${hrs}h ${remMins}min`;
-};
-
-// MÁSCARA AUXILIAR DE WHATSAPP / TELEFONE
-const maskPhone = (value) => {
-  if (!value) return '';
-  const clean = value.replace(/\D/g, '');
-  if (clean.length <= 10) {
-    return clean.replace(/(\d{2})(\d{4})(\d{0,4})/, '($1) $2-$3').trim();
-  }
-  return clean.replace(/(\d{2})(\d{5})(\d{0,4})/, '($1) $2-$3').slice(0, 15);
-};
-
-// MÁSCARA AUXILIAR DE DATA DE ANIVERSÁRIO (DD/MM)
-const maskBirthDate = (value) => {
-  if (!value) return '';
-  const clean = value.replace(/\D/g, '').slice(0, 4);
-  if (clean.length <= 2) return clean;
-  return `${clean.slice(0, 2)}/${clean.slice(2, 4)}`;
-};
-
-const DAY_NAMES = [
-  'Domingo',
-  'Segunda-feira',
-  'Terça-feira',
-  'Quarta-feira',
-  'Quinta-feira',
-  'Sexta-feira',
-  'Sábado'
-];
-
-export default function AgendamentoCliente() {
+export default function EcommerceCliente() {
   const router = useRouter();
-  const { slug, prof, staff } = router.query;
+  const { slug } = router.query;
 
   const [tenant, setTenant] = useState(null);
-  const [professionals, setProfessionals] = useState([]);
-  const [services, setServices] = useState([]);
-  const [profServices, setProfServices] = useState([]);
-  const [blockedTimes, setBlockedTimes] = useState([]);
+  const [categories, setCategories] = useState([]);
+  const [products, setProducts] = useState([]);
+  const [neighborhoods, setNeighborhoods] = useState([]);
+  const [selectedCat, setSelectedCat] = useState('ALL');
   const [loading, setLoading] = useState(true);
 
-  // ESTADOS DO AGENDAMENTO
-  const [selectedProf, setSelectedProf] = useState('');
-  const [selectedServices, setSelectedServices] = useState([]); // Guarda 0 ou 1 serviço
-  const [selectedDate, setSelectedDate] = useState(getTodayLocal());
-  const [selectedTime, setSelectedTime] = useState('');
-  const [existingAppointments, setExistingAppointments] = useState([]);
+  // CARROSSEL DE BANNERS PROMOCIONAIS
+  const [currentBannerIndex, setCurrentBannerIndex] = useState(0);
 
-  // DADOS DO CLIENTE E CARTÃO FIDELIDADE
+  // LISTA DE TAMANHOS DE ROUPA PADRÃO (FALLBACK)
+  const DEFAULT_FASHION_SIZES = ['P', 'M', 'G', 'GG', 'XG'];
+
+  // MODAL DE DETALHES DO PRODUTO
+  const [selectedProduct, setSelectedProduct] = useState(null);
+  const [activeImage, setActiveImage] = useState('');
+  const [selectedVariations, setSelectedVariations] = useState({});
+  const [productQuantity, setProductQuantity] = useState(1);
+  const [productNote, setProductNote] = useState('');
+
+  // CARRINHO E CHECKOUT
+  const [cart, setCart] = useState([]);
+  const [showCartModal, setShowCartModal] = useState(false);
+  const [deliveryType, setDeliveryType] = useState('ENTREGA');
+  const [hybridOption, setHybridOption] = useState('bairro'); // 'bairro' ou 'cep'
+  const [selectedNeighId, setSelectedNeighId] = useState('');
   const [customerName, setCustomerName] = useState('');
   const [customerPhone, setCustomerPhone] = useState('');
-  const [customerBirthDate, setCustomerBirthDate] = useState('');
-  const [paymentMethod, setPaymentMethod] = useState('No Local');
+  const [customerAddress, setCustomerAddress] = useState('');
+  const [paymentMethod, setPaymentMethod] = useState('PIX');
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const submittingRef = useRef(false); // trava imediata contra toque duplo
-  const [bookingDone, setBookingDone] = useState(null); // tela de sucesso após agendar
-  const [loyaltyCount, setLoyaltyCount] = useState(0);
 
-  // MODAL MEUS AGENDAMENTOS
-  const [showMyAppsModal, setShowMyAppsModal] = useState(false);
-  const [searchPhone, setSearchPhone] = useState('');
-  const [myAppointments, setMyAppointments] = useState([]);
-  const [isSearchingApps, setIsSearchingApps] = useState(false);
+  // ESTADOS DO PIX DINÂMICO
+  const [showPixModal, setShowPixModal] = useState(false);
+  const [pixQrCodeBase64, setPixQrCodeBase64] = useState('');
+  const [pixCopyPaste, setPixCopyPaste] = useState('');
+  const [pixPaymentId, setPixPaymentId] = useState(null);
+  const [pixStatus, setPixStatus] = useState('pending');
+  const [pixCopySuccess, setPixCopySuccess] = useState(false);
+  const [currentOrderId, setCurrentOrderId] = useState(null);
+  const [currentOrderPayload, setCurrentOrderPayload] = useState(null);
 
-  // ESTADOS DE REAGENDAMENTO
-  const [editingUserApp, setEditingUserApp] = useState(null);
-  const [userNewDate, setUserNewDate] = useState('');
-  const [userNewTime, setUserNewTime] = useState('');
-  const [isSavingUserReschedule, setIsSavingUserReschedule] = useState(false);
+  // ESTADOS DO MEUS PEDIDOS
+  const [showMyOrdersModal, setShowMyOrdersModal] = useState(false);
+  const [myOrdersList, setMyOrdersList] = useState([]);
+  const [loadingMyOrders, setLoadingMyOrders] = useState(false);
+
+  // CÁLCULO DE FRETE POR CEP
+  const [destinationCep, setDestinationCep] = useState('');
+  const [isCalculatingCep, setIsCalculatingCep] = useState(false);
+  const [calculatedOptions, setCalculatedOptions] = useState([]);
+  const [selectedShippingOption, setSelectedShippingOption] = useState(null);
+  const [cepError, setCepError] = useState('');
+
+  // CUPOM DE DESCONTO
+  const [couponInput, setCouponInput] = useState('');
+  const [appliedCoupon, setAppliedCoupon] = useState(null);
+  const [couponMessage, setCouponMessage] = useState({ type: '', text: '' });
 
   useEffect(() => {
     if (router.isReady && slug) {
       fetchTenantData();
     }
-
-    // CARREGA TELEFONE E ANIVERSÁRIO SALVO DO CLIENTE (SE HOUVER)
-    const savedPhone = localStorage.getItem('client_saved_phone');
-    const savedBirth = localStorage.getItem('client_saved_birth');
-    if (savedPhone) {
-      setCustomerPhone(maskPhone(savedPhone));
-      setSearchPhone(maskPhone(savedPhone));
-    }
-    if (savedBirth) {
-      setCustomerBirthDate(maskBirthDate(savedBirth));
-    }
   }, [router.isReady, slug]);
 
+  // POLLING DE MONITORAMENTO EM TEMPO REAL DO PIX DINÂMICO
   useEffect(() => {
-    if (professionals.length === 1) {
-      setSelectedProf(professionals[0].id);
-    } else if (professionals.length > 1) {
-      const urlProfId = prof || staff;
-      if (urlProfId) {
-        const urlMatch = professionals.find(p => String(p.id) === String(urlProfId));
-        if (urlMatch) {
-          setSelectedProf(urlMatch.id);
+    let interval = null;
+    if (showPixModal && pixPaymentId && tenant?.pix_access_token && pixStatus !== 'approved') {
+      interval = setInterval(async () => {
+        try {
+          const res = await fetch(`https://api.mercadopago.com/v1/payments/${pixPaymentId}`, {
+            headers: {
+              'Authorization': `Bearer ${tenant.pix_access_token}`
+            }
+          });
+          const data = await res.json();
+          if (data && data.status === 'approved') {
+            setPixStatus('approved');
+            if (currentOrderId) {
+              await supabase.from('orders').update({ is_paid: true }).eq('id', currentOrderId);
+            }
+            clearInterval(interval);
+          }
+        } catch (e) {
+          console.error("Erro ao consultar status do PIX:", e);
         }
-      }
+      }, 3500);
     }
-  }, [professionals, prof, staff]);
-
-  useEffect(() => {
-    const targetDate = editingUserApp ? userNewDate : selectedDate;
-    const targetProf = editingUserApp ? editingUserApp.professional_id : selectedProf;
-
-    if (tenant?.id && targetDate && targetProf) {
-      fetchExistingAppointmentsAndBlocks(targetDate, targetProf);
-    }
-  }, [tenant?.id, selectedDate, selectedProf, userNewDate, editingUserApp]);
-
-  // ATUALIZA OS HORÁRIOS AO VOLTAR PARA A PÁGINA (ex.: voltou do WhatsApp) E A CADA 1 MINUTO
-  useEffect(() => {
-    if (!tenant?.id) return;
-    const refresh = () => {
-      if (document.visibilityState !== 'visible') return;
-      const targetDate = editingUserApp ? userNewDate : selectedDate;
-      const targetProf = editingUserApp ? editingUserApp.professional_id : selectedProf;
-      if (targetDate && targetProf) fetchExistingAppointmentsAndBlocks(targetDate, targetProf);
-    };
-    window.addEventListener('pageshow', refresh);
-    document.addEventListener('visibilitychange', refresh);
-    const timer = setInterval(refresh, 60000);
     return () => {
-      window.removeEventListener('pageshow', refresh);
-      document.removeEventListener('visibilitychange', refresh);
-      clearInterval(timer);
+      if (interval) clearInterval(interval);
     };
-  }, [tenant?.id, selectedDate, selectedProf, userNewDate, editingUserApp]);
+  }, [showPixModal, pixPaymentId, pixStatus, tenant, currentOrderId]);
 
-  // BUSCA OS DADOS DE FIDELIDADE SEMPRE QUE O TELEFONE DO CLIENTE FOR ALTERADO
+  // CARROSSEL AUTOMÁTICO DE BANNERS
+  const promoBannerList = tenant?.promo_banners ? tenant.promo_banners.split(',').map(b => b.trim()).filter(Boolean) : [];
+
   useEffect(() => {
-    if (tenant?.id && tenant?.loyalty_enabled && customerPhone) {
-      fetchCustomerLoyalty(customerPhone);
-    }
-  }, [tenant?.id, tenant?.loyalty_enabled, customerPhone]);
+    if (promoBannerList.length <= 1) return;
+    const timer = setInterval(() => {
+      setCurrentBannerIndex((prev) => (prev + 1) % promoBannerList.length);
+    }, 4000);
+    return () => clearInterval(timer);
+  }, [promoBannerList.length]);
 
   const fetchTenantData = async () => {
     setLoading(true);
-    const cleanSlug = String(slug).toLowerCase().trim();
+    const cleanSlug = String(slug).trim();
+    
+    const { data: tData, error: tErr } = await supabase
+      .from('tenants')
+      .select('*')
+      .ilike('slug', cleanSlug)
+      .maybeSingle();
 
-    // DADOS DA LOJA VÊM DO SERVIDOR, SEM SENHAS/TOKENS (antes iam para o navegador de qualquer visitante)
-    let tData = null;
-    let pData = [];
-    try {
-      const resp = await fetch(`/api/public-tenant?slug=${encodeURIComponent(cleanSlug)}`);
-      const json = await resp.json();
-      tData = json.tenant || null;
-      pData = json.professionals || [];
-    } catch (err) {
-      console.error('Erro ao carregar estabelecimento:', err);
+    if (tErr) {
+      console.error("Erro ao buscar dados do tenant:", tErr.message);
     }
 
     if (tData) {
-      setTenant({
-        ...tData,
-        work_days: tData.work_days || [1, 2, 3, 4, 5, 6],
-        loyalty_enabled: tData.loyalty_enabled || false,
-        loyalty_target_visits: tData.loyalty_target_visits || 10,
-        loyalty_reward_text: tData.loyalty_reward_text || '1 Atendimento Grátis',
-        daily_notices: tData.daily_notices || {}
-      });
+      setTenant(tData);
 
-      // BUSCA OS SERVIÇOS ATIVOS ORDENADOS POR 'position' ASCENDENTE E DEPOIS 'id'
-      const { data: sData } = await supabase
-        .from('services')
-        .select('*')
-        .eq('tenant_id', tData.id)
-        .eq('active', true)
-        .order('position', { ascending: true })
-        .order('id', { ascending: true });
+      if (tData.pixel_id && typeof window !== 'undefined') {
+        !(function (f, b, e, v, n, t, s) {
+          if (f.fbq) return; n = f.fbq = function () { n.callMethod ? n.callMethod.apply(n, arguments) : n.queue.push(arguments); };
+          if (!f._fbq) f._fbq = n; n.push = n; n.loaded = !0; n.version = '2.0';
+          t = b.createElement(e); t.async = !0;
+          t.src = v; s = b.getElementsByTagName(e)[0];
+          s.parentNode.insertBefore(t, s);
+        })(window, document, 'script', 'https://connect.facebook.net/en_US/fbevents.js');
+        window.fbq('init', tData.pixel_id);
+        window.fbq('track', 'PageView');
+      }
 
-      // SÓ OS VÍNCULOS DOS PROFISSIONAIS DESTA LOJA (antes buscava de todas as lojas)
-      const profIds = (pData || []).map(p => p.id);
-      const { data: psData } = profIds.length > 0
-        ? await supabase.from('professional_services').select('*').in('professional_id', profIds)
-        : { data: [] };
+      const { data: cData } = await supabase.from('categories').select('*').eq('tenant_id', tData.id).order('id', { ascending: true });
+      const { data: pData } = await supabase.from('products').select('*').eq('tenant_id', tData.id).eq('active', true).order('id', { ascending: true });
+      const { data: nData } = await supabase.from('neighborhoods').select('*').eq('tenant_id', tData.id).order('id', { ascending: true });
 
-      if (pData) setProfessionals(pData);
-      if (sData) setServices(sData);
-      if (psData) setProfServices(psData);
+      if (cData) setCategories(cData);
+      if (pData) setProducts(pData);
+      if (nData) setNeighborhoods(nData);
     }
     setLoading(false);
   };
 
-  // BUSCA SELOS UNIFICADA NA TABELA tenant_customers PARA SINCRONIA COM ADMIN E AGENDA
-  const fetchCustomerLoyalty = async (phone) => {
-    if (!tenant?.id || !phone) return;
-    const clean = phone.replace(/\D/g, '');
-    if (clean.length < 10) return;
-
-    const { data } = await supabase
-      .from('tenant_customers')
-      .select('loyalty_stamps')
-      .eq('tenant_id', tenant.id)
-      .eq('customer_phone', clean)
-      .maybeSingle();
-
-    if (data) {
-      setLoyaltyCount(data.loyalty_stamps || 0);
-    } else {
-      setLoyaltyCount(0);
-    }
-  };
-
-  const fetchExistingAppointmentsAndBlocks = async (targetDate = selectedDate, targetProf = selectedProf) => {
-    if (!tenant?.id) return;
-
-    let appQuery = supabase
-      .from('appointments')
-      .select('*')
-      .eq('tenant_id', tenant.id)
-      .eq('appointment_date', targetDate)
-      .neq('status', 'cancelado');
-
-    if (targetProf) {
-      appQuery = appQuery.eq('professional_id', targetProf);
-    }
-
-    let blockQuery = supabase
-      .from('blocked_times')
-      .select('*')
-      .eq('tenant_id', tenant.id);
-
-    const { data: apps } = await appQuery;
-    const { data: blocks } = await blockQuery;
-
-    if (apps) setExistingAppointments(apps);
-    if (blocks) setBlockedTimes(blocks);
-  };
-
-  const handleSearchMyAppointments = async (e) => {
-    if (e) e.preventDefault();
-    const clean = searchPhone.replace(/\D/g, '');
-    // EXIGE O NÚMERO COMPLETO (antes digitar "9" listava agendamentos de outras pessoas)
-    if (clean.length < 10) return alert("Digite seu WhatsApp completo com DDD!");
-
-    localStorage.setItem('client_saved_phone', clean);
-    setIsSearchingApps(true);
-
-    fetchCustomerLoyalty(clean);
-
-    const { data } = await supabase
-      .from('appointments')
-      .select('*')
-      .eq('tenant_id', tenant.id)
-      .ilike('customer_phone', `%${clean}`)
-      .order('appointment_date', { ascending: false });
-
-    if (data) setMyAppointments(data);
-    setIsSearchingApps(false);
-  };
-
-  const handleUserCancelApp = async (app) => {
-    const formattedDate = app.appointment_date.split('-').reverse().join('/');
-    if (!confirm(`Deseja realmente cancelar seu agendamento do dia ${formattedDate} às ${app.start_time}?`)) return;
-
-    const { error } = await supabase
-      .from('appointments')
-      .update({ status: 'cancelado' })
-      .eq('id', app.id)
-      .eq('tenant_id', tenant.id);
-
-    if (error) {
-      alert("Erro ao cancelar: " + error.message);
-    } else {
-      alert("Agendamento cancelado com sucesso!");
-
-      try {
-        await fetch('/api/notify', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            tenant_id: tenant.id,
-            title: '❌ Agendamento Cancelado',
-            message: `O cliente ${app.customer_name} cancelou o agendamento do dia ${formattedDate} às ${app.start_time}.`,
-            url: `https://agendamento.sinergemkt.com/${tenant.slug}/agenda`
-          })
-        });
-      } catch (err) {
-        console.error("Erro ao disparar notificação:", err);
-      }
-
-      const appProfObj = professionals.find(p => String(p.id) === String(app.professional_id));
-      const targetPhone = (appProfObj && appProfObj.phone) ? appProfObj.phone : tenant.whatsapp;
-      const cleanWhatsapp = targetPhone ? targetPhone.replace(/\D/g, '') : '';
-
-      if (cleanWhatsapp) {
-        const msg = `*CANCELAMENTO DE AGENDAMENTO #${app.id} - ${tenant.name.toUpperCase()}*\n\n` +
-          `Olá, o cliente *${app.customer_name}* cancelou o agendamento do dia *${formattedDate}* às *${app.start_time}*.`;
-
-        const waTarget = cleanWhatsapp.length <= 11 ? `55${cleanWhatsapp}` : cleanWhatsapp;
-        window.location.href = `https://wa.me/${waTarget}?text=${encodeURIComponent(msg)}`;
-      } else {
-        handleSearchMyAppointments();
+  const saveOrderIdToLocal = (orderId) => {
+    if (typeof window !== 'undefined' && tenant?.id) {
+      const storageKey = `my_orders_${tenant.id}`;
+      const existing = JSON.parse(localStorage.getItem(storageKey) || '[]');
+      if (!existing.includes(orderId)) {
+        existing.unshift(orderId);
+        localStorage.setItem(storageKey, JSON.stringify(existing));
       }
     }
   };
 
-  const handleOpenUserReschedule = (app) => {
-    setEditingUserApp(app);
-    setUserNewDate(app.appointment_date);
-    setUserNewTime('');
-  };
-
-  const handleSaveUserReschedule = async (e) => {
-    e.preventDefault();
-    if (!userNewDate || !userNewTime) return alert("Selecione nova data e um horário disponível!");
-
-    setIsSavingUserReschedule(true);
-
-    const duration = editingUserApp.total_duration_minutes || 30;
-    const [h, m] = userNewTime.split(':').map(Number);
-    const endDateObj = new Date();
-    endDateObj.setHours(h, m + duration, 0, 0);
-    const endTime = endDateObj.toTimeString().substring(0, 5);
-
-    const { error } = await supabase
-      .from('appointments')
-      .update({
-        appointment_date: userNewDate,
-        start_time: userNewTime,
-        end_time: endTime,
-        status: 'agendado'
-      })
-      .eq('id', editingUserApp.id)
-      .eq('tenant_id', tenant.id);
-
-    setIsSavingUserReschedule(false);
-
-    if (error) {
-      if (isSlotTakenError(error)) {
-        setUserNewTime('');
-        fetchExistingAppointmentsAndBlocks(userNewDate, editingUserApp.professional_id);
-        return alert("⚠️ Este horário acabou de ser reservado por outra pessoa. Escolha outro horário.");
-      }
-      return alert("Erro ao reagendar: " + error.message);
-    }
-
-    const formattedDate = userNewDate.split('-').reverse().join('/');
+  const handleOpenMyOrders = async () => {
+    setShowMyOrdersModal(true);
+    setLoadingMyOrders(true);
 
     try {
-      await fetch('/api/notify', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          tenant_id: tenant.id,
-          title: '🔄 Horário Reagendado!',
-          message: `${editingUserApp.customer_name} reagendou o atendimento para ${formattedDate} às ${userNewTime}.`,
-          url: `https://agendamento.sinergemkt.com/${tenant.slug}/agenda`
-        })
-      });
-    } catch (err) {
-      console.error("Erro ao disparar notificação:", err);
-    }
+      if (typeof window !== 'undefined' && tenant?.id) {
+        const storageKey = `my_orders_${tenant.id}`;
+        const storedIds = JSON.parse(localStorage.getItem(storageKey) || '[]');
 
-    const appProfObj = professionals.find(p => String(p.id) === String(editingUserApp.professional_id));
-    const targetPhone = (appProfObj && appProfObj.phone) ? appProfObj.phone : tenant.whatsapp;
-    const cleanWhatsapp = targetPhone ? targetPhone.replace(/\D/g, '') : '';
+        if (storedIds.length > 0) {
+          const { data, error } = await supabase
+            .from('orders')
+            .select('*')
+            .eq('tenant_id', tenant.id)
+            .in('id', storedIds)
+            .order('id', { ascending: false });
 
-    if (cleanWhatsapp) {
-      const msg = `*SOLICITAÇÃO DE REAGENDAMENTO #${editingUserApp.id} - ${tenant.name.toUpperCase()}*\n\n` +
-        `Cliente: *${editingUserApp.customer_name}*\n` +
-        `Nova Data: *${formattedDate}*\n` +
-        `Novo Horário: *${userNewTime}*`;
-
-      const waTarget = cleanWhatsapp.length <= 11 ? `55${cleanWhatsapp}` : cleanWhatsapp;
-      // Fecha o formulário antes de sair, para não reenviar ao voltar do WhatsApp
-      setEditingUserApp(null);
-      setMyAppointments(prev => prev.map(a => a.id === editingUserApp.id ? { ...a, appointment_date: userNewDate, start_time: userNewTime, end_time: endTime } : a));
-      window.location.href = `https://wa.me/${waTarget}?text=${encodeURIComponent(msg)}`;
-    } else {
-      alert("Agendamento reagendado com sucesso!");
-      setEditingUserApp(null);
-      handleSearchMyAppointments();
-    }
-  };
-
-  if (loading) return <div className="min-h-screen bg-gray-950 text-white flex items-center justify-center font-sans"><p className="text-xs text-gray-400">Carregando...</p></div>;
-  if (!tenant) return <div className="min-h-screen bg-gray-950 text-white flex items-center justify-center font-sans"><h1 className="text-xl font-bold text-orange-500">Estabelecimento não encontrado</h1></div>;
-
-  // MAPEAMENTO DAS CORES CONFIGURADAS NO PAINEL MASTER
-  const primaryColor = tenant.primary_color || tenant.button_color || '#121212';
-  const btnTextColor = tenant.button_text_color || '#FFFFFF';
-  const bgColor = tenant.background_color || tenant.secondary_color || '#6C7B5B';
-  const cardColor = tenant.card_color || tenant.card_bg_color || '#FFFFFF';
-  const textColor = tenant.text_color || '#192F19';
-  const priceColor = tenant.price_color || '#6C7B5B';
-
-  const totalDuration = selectedServices.reduce((acc, s) => acc + (s.duration_minutes || 30), 0);
-  const totalPrice = selectedServices.reduce((acc, s) => acc + Number(s.price || 0), 0);
-
-  const selectedProfObj = professionals.find(p => String(p.id) === String(selectedProf));
-  const activeInstagram = (selectedProfObj && selectedProfObj.instagram_url) 
-    ? selectedProfObj.instagram_url 
-    : (tenant?.instagram_url || '');
-
-  const formattedInstagramUrl = activeInstagram
-    ? (activeInstagram.startsWith('http') ? activeInstagram : `https://instagram.com/${activeInstagram.replace('@', '').trim()}`)
-    : '';
-
-  // IDENTIFICAÇÃO DO DIA DA SEMANA E AVISO DIÁRIO CORRESPONDENTE
-  const selectedDayOfWeek = new Date(selectedDate + 'T00:00:00').getDay();
-  let parsedDailyNotices = tenant?.daily_notices || {};
-  if (typeof parsedDailyNotices === 'string') {
-    try { parsedDailyNotices = JSON.parse(parsedDailyNotices); } catch (e) { parsedDailyNotices = {}; }
-  }
-  const currentDayNotice = parsedDailyNotices[selectedDayOfWeek] || parsedDailyNotices[String(selectedDayOfWeek)] || '';
-
-  const displayedServices = services.filter(srv => {
-    if (!selectedProf) return false;
-
-    let allowedProfIds = srv.professional_ids;
-    if (typeof allowedProfIds === 'string') {
-      try { allowedProfIds = JSON.parse(allowedProfIds); } catch (e) { allowedProfIds = []; }
-    }
-
-    if (Array.isArray(allowedProfIds) && allowedProfIds.length > 0) {
-      return allowedProfIds.some(id => String(id) === String(selectedProf));
-    }
-
-    const hasTableRel = profServices.some(ps => String(ps.service_id) === String(srv.id));
-    if (hasTableRel) {
-      return profServices.some(ps => String(ps.service_id) === String(srv.id) && String(ps.professional_id) === String(selectedProf));
-    }
-
-    return true;
-  });
-
-  // AGRUPAMENTO DE SERVIÇOS POR CATEGORIA (MANTÉM A ORDEM ORIGINAL DE EXIBIÇÃO)
-  const groupedServices = displayedServices.reduce((acc, srv) => {
-    const categoryName = (srv.category && srv.category.trim() !== '') ? srv.category.trim() : 'Serviços Gerais';
-    if (!acc[categoryName]) {
-      acc[categoryName] = [];
-    }
-    acc[categoryName].push(srv);
-    return acc;
-  }, {});
-
-  const handleSelectProf = (profId) => {
-    setSelectedProf(profId);
-    setSelectedServices([]);
-    setSelectedTime('');
-  };
-
-  const handleToggleService = (srv) => {
-    const isSelected = selectedServices.some(s => s.id === srv.id);
-    if (isSelected) {
-      setSelectedServices([]);
-    } else {
-      setSelectedServices([srv]);
-    }
-    setSelectedTime('');
-  };
-
-  // FUNÇÃO DE VERIFICAÇÃO DE HORÁRIOS COM SALTO INTELIGENTE E INTERVALO DE 15 MINUTOS
-  const getSlotAvailability = (targetProfId = selectedProf, targetServices = selectedServices, targetDate = selectedDate, ignoreAppId = null) => {
-    if (targetServices.length === 0 || !targetDate) {
-      return { slots: [], status: 'select_service', message: 'Selecione o serviço desejado.' };
-    }
-
-    if (!targetProfId) {
-      return { slots: [], status: 'select_prof', message: '💈 Selecione um profissional.' };
-    }
-
-    const totalDur = targetServices.reduce((acc, s) => acc + (s.duration_minutes || 30), 0);
-    const dateObj = new Date(targetDate + 'T00:00:00');
-    const dayOfWeek = dateObj.getDay();
-
-    const profObj = professionals.find(p => String(p.id) === String(targetProfId));
-    if (!profObj) {
-      return { slots: [], status: 'no_prof', message: 'Profissional não encontrado.' };
-    }
-
-    // Tratamento para pDays em Array numérico
-    let pDays = profObj.work_days || [1, 2, 3, 4, 5, 6];
-    if (typeof pDays === 'string') {
-      try { pDays = JSON.parse(pDays); } catch (e) { pDays = [1, 2, 3, 4, 5, 6]; }
-    }
-    const numericPDays = (Array.isArray(pDays) ? pDays : []).map(Number);
-
-    if (!numericPDays.includes(dayOfWeek)) {
-      return { slots: [], status: 'prof_off', message: `💈 ${profObj.name} não atende neste dia da semana.` };
-    }
-
-    let profWorkHours = profObj.work_hours || {};
-    if (typeof profWorkHours === 'string') {
-      try { profWorkHours = JSON.parse(profWorkHours); } catch (e) { profWorkHours = {}; }
-    }
-
-    const dayHours = profWorkHours[dayOfWeek] || { open: '08:00', close: '18:00' };
-
-    const openHour = parseInt((dayHours.open || '08:00').split(':')[0]);
-    const openMin = parseInt((dayHours.open || '08:00').split(':')[1] || '0');
-    const closeHour = parseInt((dayHours.close || '18:00').split(':')[0]);
-    const closeMin = parseInt((dayHours.close || '18:00').split(':')[1] || '0');
-
-    let breakStartMin = -1;
-    let breakEndMin = -1;
-    if (profObj.break_start && profObj.break_end) {
-      const [bStartH, bStartM] = profObj.break_start.split(':').map(Number);
-      const [bEndH, bEndM] = profObj.break_end.split(':').map(Number);
-      breakStartMin = bStartH * 60 + bStartM;
-      breakEndMin = bEndH * 60 + bEndM;
-    }
-
-    const dayBlocks = blockedTimes.filter(b => {
-      const isProfTarget = b.professional_id === null || b.professional_id === undefined || String(b.professional_id) === String(targetProfId);
-      if (!isProfTarget) return false;
-
-      if (b.block_date === targetDate) return true;
-      const isRec = b.is_recurring || (b.reason && b.reason.includes('[RECORRENTE]'));
-      if (isRec && Number(b.recurring_day) === dayOfWeek) return true;
-      return false;
-    });
-
-    let currentMin = openHour * 60 + openMin;
-    const endMin = closeHour * 60 + closeMin;
-    const slots = new Set();
-
-    const now = new Date();
-    const todayStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
-    const isToday = targetDate === todayStr;
-    const nowInMinutes = now.getHours() * 60 + now.getMinutes();
-
-    const profApps = existingAppointments.filter(app => String(app.professional_id) === String(targetProfId) && app.id !== ignoreAppId);
-
-    while (currentMin + totalDur <= endMin) {
-      if (isToday && currentMin <= nowInMinutes) {
-        currentMin += 15;
-        continue;
+          if (!error && data) {
+            setMyOrdersList(data);
+          }
+        } else {
+          setMyOrdersList([]);
+        }
       }
-
-      const slotStartMin = currentMin;
-      const slotEndMin = currentMin + totalDur;
-
-      let conflictingAppEndMin = null;
-      const hasAppConflict = profApps.some(app => {
-        const [aStartH, aStartM] = app.start_time.split(':').map(Number);
-        const aStartMin = aStartH * 60 + aStartM;
-        const aEndMin = aStartMin + (app.total_duration_minutes || 30);
-        const isConflicting = Math.max(slotStartMin, aStartMin) < Math.min(slotEndMin, aEndMin);
-        if (isConflicting && aEndMin > slotStartMin) {
-          conflictingAppEndMin = Math.max(conflictingAppEndMin || 0, aEndMin);
-        }
-        return isConflicting;
-      });
-
-      let conflictingBlockEndMin = null;
-      const hasBlockConflict = dayBlocks.some(b => {
-        const [bStartH, bStartM] = b.start_time.split(':').map(Number);
-        const [bEndH, bEndM] = b.end_time.split(':').map(Number);
-        const bStartMin = bStartH * 60 + bStartM;
-        const bEndMin = bEndH * 60 + bEndM;
-        const isConflicting = Math.max(slotStartMin, bStartMin) < Math.min(slotEndMin, bEndMin);
-        if (isConflicting && bEndMin > slotStartMin) {
-          conflictingBlockEndMin = Math.max(conflictingBlockEndMin || 0, bEndMin);
-        }
-        return isConflicting;
-      });
-
-      const hasBreakConflict = (breakStartMin !== -1 && breakEndMin !== -1) && 
-        (Math.max(slotStartMin, breakStartMin) < Math.min(slotEndMin, breakEndMin));
-
-      if (!hasAppConflict && !hasBlockConflict && !hasBreakConflict) {
-        const h = Math.floor(currentMin / 60);
-        const m = currentMin % 60;
-        const timeString = `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
-        slots.add(timeString);
-        
-        currentMin += 15;
-      } else {
-        let nextJumpMin = currentMin + 15;
-
-        if (hasAppConflict && conflictingAppEndMin) {
-          nextJumpMin = Math.max(nextJumpMin, conflictingAppEndMin);
-        }
-        if (hasBlockConflict && conflictingBlockEndMin) {
-          nextJumpMin = Math.max(nextJumpMin, conflictingBlockEndMin);
-        }
-        if (hasBreakConflict) {
-          nextJumpMin = Math.max(nextJumpMin, breakEndMin);
-        }
-
-        currentMin = nextJumpMin;
-      }
+    } catch (e) {
+      console.error("Erro ao buscar histórico de pedidos:", e);
+    } finally {
+      setLoadingMyOrders(false);
     }
-
-    return { slots: Array.from(slots), status: 'ok' };
   };
 
-  const slotData = getSlotAvailability(selectedProf, selectedServices, selectedDate);
-  const availableSlots = slotData.slots;
+  const handleOpenProductModal = (product) => {
+    setSelectedProduct(product);
+    setProductQuantity(1);
+    setProductNote('');
 
-  const rescheduleSlotData = editingUserApp 
-    ? getSlotAvailability(editingUserApp.professional_id, editingUserApp.services_json || [{ duration_minutes: editingUserApp.total_duration_minutes }], userNewDate, editingUserApp.id)
-    : { slots: [] };
+    const gallery = product.images_json && Array.isArray(product.images_json) && product.images_json.length > 0 
+      ? product.images_json 
+      : [product.image];
+    setActiveImage(gallery[0] || 'https://images.unsplash.com/photo-1523275335684-37898b6baf30?w=300&auto=format&fit=crop&q=80');
 
-  const handleConfirmAppointment = async (e) => {
-    e.preventDefault();
-    // TRAVA IMEDIATA: impede dois envios por toque duplo
-    if (submittingRef.current) return;
-
-    const cleanPhone = customerPhone.replace(/\D/g, '');
-
-    if (!selectedProf) return alert("Selecione a profissional!");
-    if (selectedServices.length === 0) return alert("Selecione o serviço desejado!");
-    if (!selectedTime) return alert("Selecione o horário desejado!");
-    if (!customerName || cleanPhone.length < 10) return alert("Preencha seu Nome e WhatsApp válido!");
-
-    submittingRef.current = true;
-    setIsSubmitting(true);
-    localStorage.setItem('client_saved_phone', cleanPhone);
-    if (customerBirthDate) {
-      localStorage.setItem('client_saved_birth', customerBirthDate);
+    const initialVars = {};
+    if (product.variations_json && Array.isArray(product.variations_json) && product.variations_json.length > 0) {
+      product.variations_json.forEach(v => {
+        if (v.attribute_name && v.options && v.options.length > 0) {
+          initialVars[v.attribute_name] = v.options[0];
+        }
+      });
+    } else if (!product.is_digital && (tenant?.niche === 'fashion' || !tenant?.niche)) {
+      initialVars['Tamanho'] = 'M';
     }
 
-    const [h, m] = selectedTime.split(':').map(Number);
-    const startMinutes = h * 60 + m;
-    const endMinutesTotal = startMinutes + totalDuration;
-    const endTime = `${String(Math.floor(endMinutesTotal / 60) % 24).padStart(2, '0')}:${String(endMinutesTotal % 60).padStart(2, '0')}`;
+    setSelectedVariations(initialVars);
+  };
 
-    // TRATAMENTO SEGURO DE ID DO PROFISSIONAL (NUMÉRICO OU STRING/UUID)
-    const chosenProfId = isNaN(Number(selectedProf)) ? String(selectedProf) : Number(selectedProf);
-    const chosenProfObj = professionals.find(p => String(p.id) === String(selectedProf));
-    const chosenProfName = chosenProfObj?.name || '';
-    const formattedDate = selectedDate.split('-').reverse().join('/');
+  const handleSelectVariation = (attrName, optionValue) => {
+    setSelectedVariations(prev => ({
+      ...prev,
+      [attrName]: optionValue
+    }));
+  };
 
-    const finishWithError = (message) => {
-      submittingRef.current = false;
-      setIsSubmitting(false);
-      if (message) alert(message);
+  const handleAddProductToCart = () => {
+    if (!selectedProduct) return;
+
+    const variationEntries = Object.entries(selectedVariations);
+    const variationsText = variationEntries.map(([key, val]) => `${key}: ${val}`).join(' | ');
+
+    const cartItem = {
+      cartItemId: `${selectedProduct.id}-${JSON.stringify(selectedVariations)}-${Date.now()}`,
+      id: selectedProduct.id,
+      name: selectedProduct.name,
+      variations: selectedVariations,
+      variationsText: variationsText,
+      price: Number(selectedProduct.price),
+      quantity: productQuantity,
+      note: productNote,
+      image: activeImage || selectedProduct.image,
+      is_digital: selectedProduct.is_digital || false,
+      download_url: selectedProduct.download_url || ''
     };
 
-    // 1) CONFERE NO BANCO, NA HORA, SE O HORÁRIO AINDA ESTÁ LIVRE
-    const { data: freshApps, error: freshError } = await supabase
-      .from('appointments')
-      .select('id, start_time, end_time, total_duration_minutes, customer_phone, status')
-      .eq('tenant_id', tenant.id)
-      .eq('appointment_date', selectedDate)
-      .eq('professional_id', chosenProfId)
-      .neq('status', 'cancelado');
+    setCart([...cart, cartItem]);
+    setSelectedProduct(null);
 
-    if (!freshError && freshApps) {
-      const toMin = (t) => { const [hh, mm] = String(t || '0:0').split(':').map(Number); return hh * 60 + (mm || 0); };
-      const conflicts = freshApps.filter(a => {
-        const aStart = toMin(a.start_time);
-        const aEnd = a.end_time ? toMin(a.end_time) : aStart + (a.total_duration_minutes || 30);
-        return startMinutes < aEnd && endMinutesTotal > aStart;
+    if (window.fbq) {
+      window.fbq('track', 'AddToCart', {
+        content_name: `${selectedProduct.name} ${variationsText ? `(${variationsText})` : ''}`,
+        value: Number(selectedProduct.price) * productQuantity,
+        currency: 'BRL'
       });
+    }
+  };
 
-      // A mesma cliente já tem este horário (ex.: tocou duas vezes / voltou e confirmou de novo)
-      const ownBooking = conflicts.find(a => String(a.customer_phone || '').replace(/\D/g, '').endsWith(cleanPhone) && toMin(a.start_time) === startMinutes);
-      if (ownBooking) {
-        submittingRef.current = false;
-        setIsSubmitting(false);
-        setSelectedTime('');
-        setBookingDone({ id: ownBooking.id, date: formattedDate, time: selectedTime, profName: chosenProfName, waUrl: '', alreadyExisted: true });
+  const removeFromCart = (cartItemId) => {
+    setCart(cart.filter(item => item.cartItemId !== cartItemId));
+  };
+
+  const handleCalculateCep = async (cepToCalc) => {
+    const cleanCep = (cepToCalc || destinationCep).replace(/\D/g, '');
+    if (cleanCep.length !== 8) {
+      setCepError('Digite um CEP válido com 8 números.');
+      setCalculatedOptions([]);
+      setSelectedShippingOption(null);
+      return;
+    }
+
+    setIsCalculatingCep(true);
+    setCepError('');
+
+    try {
+      const res = await fetch(`https://viacep.com.br/ws/${cleanCep}/json/`);
+      const data = await res.json();
+
+      if (data.erro) {
+        setCepError('CEP não encontrado. Verifique o número digitado.');
+        setCalculatedOptions([]);
+        setSelectedShippingOption(null);
+        setIsCalculatingCep(false);
         return;
       }
 
-      if (conflicts.length > 0) {
-        setSelectedTime('');
-        setExistingAppointments(freshApps);
-        return finishWithError("⚠️ Este horário acabou de ser reservado por outra pessoa. Escolha outro horário disponível.");
+      if (data.logradouro && !customerAddress) {
+        setCustomerAddress(`${data.logradouro}, nº , ${data.bairro} - ${data.localidade}/${data.uf}`);
       }
-    }
 
-    const appointmentData = {
-      tenant_id: tenant.id,
-      professional_id: chosenProfId,
-      customer_name: customerName,
-      customer_phone: cleanPhone,
-      client_birth_date: customerBirthDate || '',
-      services_json: selectedServices,
-      total_price: totalPrice,
-      total_duration_minutes: totalDuration,
-      appointment_date: selectedDate,
-      start_time: selectedTime,
-      end_time: endTime,
-      payment_method: paymentMethod,
-      status: 'agendado',
-      is_paid: false
-    };
+      const totalWeight = cart.reduce((acc, item) => {
+        if (item.is_digital) return acc;
+        const prod = products.find(p => p.id === item.id);
+        return acc + ((prod?.weight_kg || 0.3) * item.quantity);
+      }, 0);
 
-    // 2) GRAVA (o banco também recusa se outra pessoa gravou no mesmo instante)
-    const { data: createdApp, error } = await supabase.from('appointments').insert([appointmentData]).select().single();
+      const isFree = freeThreshold > 0 && subtotal >= freeThreshold;
+      const options = [];
 
-    if (error) {
-      if (isSlotTakenError(error)) {
-        setSelectedTime('');
-        fetchExistingAppointmentsAndBlocks(selectedDate, selectedProf);
-        return finishWithError("⚠️ Este horário acabou de ser reservado por outra pessoa. Escolha outro horário disponível.");
-      }
-      return finishWithError("Erro ao agendar: " + error.message);
-    }
+      const basePacFee = Math.max(16.50, 16.50 + (totalWeight - 0.5) * 4.5);
+      const baseSedexFee = Math.max(28.90, 28.90 + (totalWeight - 0.5) * 8.0);
 
-    const servicesListText = selectedServices.map(s => `• ${s.name} (R$ ${Number(s.price).toFixed(2)})`).join('\n');
+      options.push({
+        id: 'pac',
+        name: '📦 Correios PAC',
+        fee: isFree ? 0 : basePacFee,
+        time: '4 a 8 dias úteis'
+      });
 
-    // Notificação para a equipe deste estabelecimento (não espera terminar)
-    try {
-      fetch('/api/notify', {
-        method: 'POST',
-        keepalive: true,
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          tenant_id: tenant.id,
-          title: '✂️ Novo Agendamento Recebido!',
-          message: `${customerName} agendou para ${formattedDate} às ${selectedTime} (${chosenProfName}).`,
-          url: `https://agendamento.sinergemkt.com/${tenant.slug}/agenda`
-        })
-      }).catch(err => console.error("Erro ao disparar notificação:", err));
+      options.push({
+        id: 'sedex',
+        name: '⚡ Correios SEDEX',
+        fee: isFree ? 0 : baseSedexFee,
+        time: '1 a 3 dias úteis'
+      });
+
+      setCalculatedOptions(options);
+      setSelectedShippingOption(options[0]);
     } catch (err) {
-      console.error("Erro ao disparar notificação:", err);
+      setCepError('Erro ao consultar o CEP. Tente novamente.');
+      setCalculatedOptions([]);
+      setSelectedShippingOption(null);
+    } finally {
+      setIsCalculatingCep(false);
+    }
+  };
+
+  const handleApplyCoupon = async (e) => {
+    e.preventDefault();
+    if (!couponInput.trim()) return;
+
+    const cleanCode = couponInput.trim().toUpperCase();
+    const { data: cpData, error: cpErr } = await supabase
+      .from('coupons')
+      .select('*')
+      .eq('tenant_id', tenant.id)
+      .ilike('code', cleanCode)
+      .eq('active', true)
+      .maybeSingle();
+
+    if (cpErr || !cpData) {
+      setAppliedCoupon(null);
+      setCouponMessage({ type: 'error', text: 'Cupom inválido ou expirado.' });
+    } else {
+      setAppliedCoupon(cpData);
+      setCouponMessage({ type: 'success', text: `Cupom "${cpData.code}" aplicado com sucesso!` });
+    }
+  };
+
+  const copyPixCode = () => {
+    if (!pixCopyPaste) return;
+    navigator.clipboard.writeText(pixCopyPaste);
+    setPixCopySuccess(true);
+    setTimeout(() => setPixCopySuccess(false), 3000);
+  };
+
+  // VERIFICA SE O CARRINHO É 100% DIGITAL
+  const isAllDigital = cart.length > 0 && cart.every(item => item.is_digital);
+
+  const sendWhatsAppNotification = (orderObj, isPaidConfirmed = false) => {
+    let orderTag = orderObj?.id ? ` #${orderObj.id}` : '';
+    let itemsText = cart.map(i => {
+      let varStr = i.variationsText ? ` [${i.variationsText}]` : '';
+      let digitalStr = i.is_digital ? ' ⚡ (Produto Digital)' : '';
+      let txt = `• ${i.quantity}x ${i.name}${varStr}${digitalStr} (R$ ${(Number(i.price) * i.quantity).toFixed(2)})`;
+      if (i.note) txt += `\n    Obs: _"${i.note}"_`;
+      return txt;
+    }).join('\n\n');
+
+    let msg = `*NOVA COMPRA NA LOJA${orderTag} - ${tenant.name.toUpperCase()}*\n\n`;
+    msg += `*Cliente:* ${customerName}\n*Telefone:* ${customerPhone}\n`;
+
+    if (isAllDigital) {
+      msg += `*Tipo de Envio:* ⚡ Envio Digital (Download / Acesso Direto)\n`;
+    } else {
+      msg += `*Tipo de Envio:* ${deliveryType === 'ENTREGA' ? `Entrega em: ${customerAddress} (${currentOrderPayload?.shippingLabel || ''})` : 'Retirar na Loja'}\n`;
+      if (destinationCep) msg += `*CEP:* ${destinationCep}\n`;
     }
 
-    let msg = `*NOVO AGENDAMENTO #${createdApp.id} - ${tenant.name.toUpperCase()}*\n\n`;
-    msg += `*Cliente:* ${customerName}\n*Telefone:* ${customerPhone}\n`;
-    if (customerBirthDate) {
-      msg += `*Aniversário:* ${customerBirthDate}\n`;
+    msg += `\n*ITENS COMPRADOS:*\n${itemsText}\n\n`;
+    msg += `*Subtotal:* R$ ${subtotal.toFixed(2)}\n`;
+    if (discountValue > 0) {
+      msg += `*Desconto (${appliedCoupon?.code}):* -R$ ${discountValue.toFixed(2)}\n`;
     }
-    msg += `*Data:* ${formattedDate} às *${selectedTime}*\n`;
-    msg += `*Profissional:* ${chosenProfName}\n\n`;
-    msg += `*SERVIÇO:*\n${servicesListText}\n\n`;
-    msg += `*Tempo Total:* ${formatDuration(totalDuration)}\n`;
-    msg += `*TOTAL:* *R$ ${totalPrice.toFixed(2)}* (${paymentMethod})`;
+    
+    if (isAllDigital) {
+      msg += `*Frete/Envio:* Sem frete (Produto Digital)\n`;
+    } else {
+      msg += `*Frete/Envio:* ${activeShippingFee === 0 ? (deliveryType === 'RETIRADA' ? 'Grátis (Retirada)' : 'FRETE GRÁTIS 🎉') : `R$ ${activeShippingFee.toFixed(2)}`}\n`;
+    }
+
+    msg += `*TOTAL:* *R$ ${total.toFixed(2)}*\n`;
+    
+    if (isPaidConfirmed) {
+      msg += `*Forma de Pagamento:* 🟢 PIX (PAGO E CONFIRMADO AUTOMATICAMENTE)`;
+    } else if (paymentMethod === 'PIX') {
+      msg += `*Forma de Pagamento:* 🟡 PIX Dinâmico (Aguardando Confirmação)`;
+    } else {
+      msg += `*Forma de Pagamento:* ${paymentMethod}`;
+    }
 
     if (tenant.custom_message) {
       msg += `\n\n📌 _${tenant.custom_message}_`;
     }
 
-    const targetPhone = (chosenProfObj && chosenProfObj.phone && chosenProfObj.phone.trim() !== '') 
-      ? chosenProfObj.phone 
-      : tenant.whatsapp;
-
-    const waTarget = toWaNumber(targetPhone);
-    const waUrl = waTarget ? `https://wa.me/${waTarget}?text=${encodeURIComponent(msg)}` : '';
-
-    // 3) MOSTRA A TELA DE SUCESSO E LIMPA A SELEÇÃO.
-    //    Se a cliente voltar do WhatsApp, verá "Agendamento confirmado" — e não o formulário preenchido.
-    submittingRef.current = false;
-    setIsSubmitting(false);
-    setSelectedTime('');
-    setBookingDone({ id: createdApp.id, date: formattedDate, time: selectedTime, profName: chosenProfName, waUrl });
-    fetchExistingAppointmentsAndBlocks(selectedDate, selectedProf);
-
-    // Mantém o comportamento de antes: abre o WhatsApp automaticamente
-    if (waUrl) {
-      setTimeout(() => { window.location.href = waUrl; }, 900);
+    const cleanWhatsapp = tenant.whatsapp ? tenant.whatsapp.replace(/\D/g, '') : '';
+    if (cleanWhatsapp) {
+      window.open(`https://wa.me/${cleanWhatsapp}?text=${encodeURIComponent(msg)}`, '_blank');
     }
   };
 
-  const handleNewBooking = () => {
-    setBookingDone(null);
-    setSelectedServices([]);
-    setSelectedTime('');
-    if (selectedProf) fetchExistingAppointmentsAndBlocks(selectedDate, selectedProf);
-    window.scrollTo({ top: 0, behavior: 'smooth' });
+  // CÁLCULOS GERAIS E FRETE
+  const primaryColor = tenant?.primary_color || '#FF8C00';
+  const btnTextColor = tenant?.button_text_color || '#FFFFFF';
+  const bgColor = tenant?.background_color || tenant?.secondary_color || '#090D16';
+  const cardColor = tenant?.card_color || '#111827';
+  const textColor = tenant?.text_color || '#FFFFFF';
+
+  const shippingMode = tenant?.shipping_mode || 'local';
+  const freeThreshold = Number(tenant?.free_shipping_threshold ?? 0.00);
+  const allowPickup = tenant?.enable_pickup ?? true;
+
+  const selectedNeighborhood = neighborhoods.find(n => String(n.id) === String(selectedNeighId));
+  const localShippingFee = selectedNeighborhood ? Number(selectedNeighborhood.fee) : 0;
+
+  const subtotal = cart.reduce((sum, item) => sum + (Number(item.price) * item.quantity), 0);
+  const isFreeShipping = freeThreshold > 0 && subtotal >= freeThreshold;
+
+  let activeShippingFee = 0;
+  if (isAllDigital) {
+    activeShippingFee = 0;
+  } else if (deliveryType === 'RETIRADA') {
+    activeShippingFee = 0;
+  } else if (shippingMode === 'local' || (shippingMode === 'hybrid' && hybridOption === 'bairro')) {
+    activeShippingFee = isFreeShipping ? 0 : localShippingFee;
+  } else if (shippingMode === 'national' || (shippingMode === 'hybrid' && hybridOption === 'cep')) {
+    activeShippingFee = isFreeShipping ? 0 : (selectedShippingOption ? selectedShippingOption.fee : 0);
+  }
+
+  let discountValue = 0;
+  if (appliedCoupon) {
+    if (appliedCoupon.discount_type === 'percent') {
+      discountValue = (subtotal * Number(appliedCoupon.discount_value)) / 100;
+    } else {
+      discountValue = Number(appliedCoupon.discount_value);
+    }
+    if (discountValue > subtotal) discountValue = subtotal;
+  }
+
+  const total = Math.max(0, subtotal - discountValue + activeShippingFee);
+
+  const promoProductsCount = products.filter(p => p.original_price && Number(p.original_price) > Number(p.price)).length;
+  
+  const filteredProducts = selectedCat === 'ALL' 
+    ? products 
+    : (selectedCat === 'OFFERS' 
+        ? products.filter(p => p.original_price && Number(p.original_price) > Number(p.price))
+        : products.filter(p => String(p.category_id) === String(selectedCat))
+      );
+
+  const handleFinishOrder = async (e) => {
+    e.preventDefault();
+    if (cart.length === 0) return alert("Seu carrinho está vazio!");
+    if (!customerName || !customerPhone) return alert("Preencha seu Nome e WhatsApp!");
+    if (!tenant || !tenant.id) return alert("Erro: Dados da loja não carregados corretamente.");
+
+    if (!isAllDigital && deliveryType === 'ENTREGA') {
+      if (!customerAddress) return alert("Preencha seu Endereço para entrega!");
+
+      if (shippingMode === 'local' || (shippingMode === 'hybrid' && hybridOption === 'bairro')) {
+        if (neighborhoods.length > 0 && !selectedNeighId) {
+          return alert("Por favor, selecione seu Bairro de entrega!");
+        }
+      }
+
+      if (shippingMode === 'national' || (shippingMode === 'hybrid' && hybridOption === 'cep')) {
+        if (!selectedShippingOption) {
+          return alert("Por favor, informe seu CEP e selecione uma opção de envio!");
+        }
+      }
+    }
+
+    setIsSubmitting(true);
+
+    let shippingLabel = 'Envio Digital (Download)';
+    if (!isAllDigital) {
+      if (deliveryType === 'RETIRADA') {
+        shippingLabel = 'Retirar na Loja';
+      } else if (shippingMode === 'local' || (shippingMode === 'hybrid' && hybridOption === 'bairro')) {
+        shippingLabel = selectedNeighborhood ? `Bairro: ${selectedNeighborhood.name}` : 'Entrega Local';
+      } else if (selectedShippingOption) {
+        shippingLabel = `${selectedShippingOption.name} (${selectedShippingOption.time})`;
+      } else {
+        shippingLabel = 'Entrega Padrão';
+      }
+      if (isFreeShipping) shippingLabel += ' [Frete Grátis]';
+    }
+
+    const orderPayload = {
+      tenant_id: tenant.id,
+      customer_name: customerName,
+      customer_phone: customerPhone,
+      address: isAllDigital ? '⚡ Produto Digital - Envio via WhatsApp / Download' : (deliveryType === 'ENTREGA' ? customerAddress : 'Retirada na Loja'),
+      neighborhood: shippingLabel,
+      items: cart.map(i => ({
+        id: i.id,
+        name: i.name,
+        quantity: i.quantity,
+        price: Number(i.price),
+        size: i.variations?.Tamanho || i.variationsText || 'Padrão',
+        variationsText: i.variationsText || '',
+        note: i.note || '',
+        is_digital: i.is_digital || false,
+        download_url: i.download_url || ''
+      })),
+      subtotal: Number(subtotal.toFixed(2)),
+      delivery_fee: Number(activeShippingFee.toFixed(2)),
+      total: Number(total.toFixed(2)),
+      payment_method: paymentMethod,
+      status: 'recebido',
+      is_paid: false
+    };
+
+    const { data: insertedOrder, error: insertErr } = await supabase
+      .from('orders')
+      .insert([orderPayload])
+      .select()
+      .maybeSingle();
+
+    if (insertErr) {
+      alert("⚠️ Erro ao salvar pedido no banco de dados:\n" + insertErr.message);
+      setIsSubmitting(false);
+      return;
+    }
+
+    saveOrderIdToLocal(insertedOrder.id);
+    setCurrentOrderId(insertedOrder.id);
+    setCurrentOrderPayload({ ...orderPayload, shippingLabel });
+
+    if (window.fbq) {
+      window.fbq('track', 'Purchase', { value: total, currency: 'BRL' });
+    }
+
+    const isPixDynamic = paymentMethod === 'PIX' && tenant.pix_enabled && tenant.pix_access_token;
+
+    if (isPixDynamic) {
+      try {
+        const mpRes = await fetch('/api/create-pix', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            amount: Number(total.toFixed(2)),
+            description: `Pedido #${insertedOrder.id} - ${tenant.name}`,
+            accessToken: tenant.pix_access_token,
+            orderId: insertedOrder.id,
+            payer: {
+              email: `${customerPhone.replace(/\D/g, '') || 'cliente'}@sac.com`,
+              name: customerName
+            }
+          })
+        });
+
+        const mpData = await mpRes.json();
+
+        if (mpRes.ok && mpData.qr_code_base64) {
+          setPixQrCodeBase64(mpData.qr_code_base64);
+          setPixCopyPaste(mpData.qr_code);
+          setPixPaymentId(mpData.id);
+          setPixStatus('pending');
+          setShowPixModal(true);
+          setShowCartModal(false);
+          setIsSubmitting(false);
+          return;
+        } else {
+          alert(`⚠️ Não foi possível gerar o PIX:\n${mpData.error || 'Verifique se o Access Token está correto no painel.'}`);
+          setIsSubmitting(false);
+          return;
+        }
+      } catch (err) {
+        console.error("Erro na rota interna do PIX:", err);
+        alert("Ocorreu um erro de conexão ao tentar gerar o PIX.");
+        setIsSubmitting(false);
+        return;
+      }
+    }
+
+    const isCardPayment = paymentMethod.includes('Cartão') && tenant.pix_access_token;
+
+    if (isCardPayment) {
+      try {
+        const prefRes = await fetch('/api/create-preference', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            items: cart.map(i => ({ name: i.name, quantity: i.quantity, price: Number(i.price) })),
+            accessToken: tenant.pix_access_token,
+            orderId: insertedOrder.id,
+            tenantName: tenant.name,
+            customerName: customerName,
+            customerPhone: customerPhone
+          })
+        });
+
+        const prefData = await prefRes.json();
+
+        if (prefRes.ok && prefData.init_point) {
+          setIsSubmitting(false);
+          setCart([]);
+          setShowCartModal(false);
+          window.location.href = prefData.init_point;
+          return;
+        } else {
+          alert(`⚠️ Não foi possível iniciar o checkout de cartão:\n${prefData.error || 'Verifique as configurações do Mercado Pago no Admin.'}`);
+          setIsSubmitting(false);
+          return;
+        }
+      } catch (err) {
+        console.error("Erro ao gerar Checkout Pro de cartão:", err);
+        alert("Erro de comunicação ao redirecionar para o pagamento.");
+        setIsSubmitting(false);
+        return;
+      }
+    }
+
+    sendWhatsAppNotification(insertedOrder, false);
+    setIsSubmitting(false);
+    setCart([]);
+    setShowCartModal(false);
+    alert("Pedido registrado com sucesso!");
   };
 
-  const targetLoyaltyVisits = tenant?.loyalty_target_visits || 10;
-  const isRewardReady = loyaltyCount >= targetLoyaltyVisits;
+  if (loading) return <div className="min-h-screen bg-gray-950 text-white flex items-center justify-center font-sans"><p className="text-xs text-gray-400">Carregando loja...</p></div>;
+  if (!tenant) return <div className="min-h-screen bg-gray-950 text-white flex items-center justify-center font-sans"><h1 className="text-xl font-bold text-orange-500">Loja não encontrada</h1></div>;
+
+  const hasCustomVariations = selectedProduct?.variations_json && Array.isArray(selectedProduct.variations_json) && selectedProduct.variations_json.length > 0;
+  const isFashionFallback = !selectedProduct?.is_digital && !hasCustomVariations && (tenant?.niche === 'fashion' || !tenant?.niche);
+
+  const productGallery = selectedProduct?.images_json && Array.isArray(selectedProduct.images_json) && selectedProduct.images_json.length > 0
+    ? selectedProduct.images_json
+    : (selectedProduct?.image ? [selectedProduct.image] : []);
+
+  const selectedProductHasPromo = selectedProduct && selectedProduct.original_price && Number(selectedProduct.original_price) > Number(selectedProduct.price);
+  const selectedProductSavings = selectedProductHasPromo ? (Number(selectedProduct.original_price) - Number(selectedProduct.price)) : 0;
+
+  const cleanTenantWhatsapp = tenant?.whatsapp ? tenant.whatsapp.replace(/\D/g, '') : '';
 
   return (
-    <div className="min-h-screen font-sans pb-12 transition-colors duration-300 flex flex-col justify-between" style={{ backgroundColor: bgColor, color: textColor }}>
+    <div className="min-h-screen font-sans pb-24 max-w-md mx-auto transition-colors duration-300 relative flex flex-col justify-between" style={{ backgroundColor: bgColor, color: textColor }}>
       
-      {/* PWA & METATAGS DINÂMICAS */}
-      <Head>
-        <title>{tenant?.name ? `${tenant.name} - Agendamento Online` : 'Agendamento Online'}</title>
-        {slug && <link rel="manifest" href={`/api/manifest?slug=${slug}&app=catalogo`} />}
-        <meta name="theme-color" content={primaryColor} />
-        <link rel="apple-touch-icon" href="/icon-192.png" />
-        <meta name="apple-mobile-web-app-capable" content="yes" />
-        <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
-        <meta name="apple-mobile-web-app-title" content={tenant?.name || 'Agendamento'} />
-      </Head>
+      <div>
+        {/* BARRA DE AVISOS E COMUNICADOS */}
+        {tenant.custom_message && (
+          <div className="bg-gradient-to-r from-orange-600 via-amber-600 to-orange-500 text-white text-[11px] font-bold py-2.5 px-4 text-center shadow-md flex items-center justify-center space-x-2">
+            <span>📢 {tenant.custom_message}</span>
+          </div>
+        )}
 
-      {/* CONTAINER RESPONSIVO */}
-      <div className="w-full max-w-md sm:max-w-2xl md:max-w-4xl mx-auto px-0 sm:px-4 md:px-6">
-        
-        {/* BANNER / CAPA DA LOJA */}
-        <div className="relative h-36 sm:h-48 md:h-56 bg-gray-900 sm:rounded-2xl overflow-hidden shadow-md border-b sm:border border-black/10">
-          <img src={tenant.banner_url || 'https://images.unsplash.com/photo-1503951914875-452162b0f3f1?w=800&auto=format&fit=crop&q=80'} alt="Capa" className="w-full h-full object-cover opacity-60" />
+        {/* CAPA DA LOJA */}
+        <div className="relative h-36 bg-gray-900 border-b border-white/10">
+          <img src={tenant.banner_url || 'https://images.unsplash.com/photo-1441986300917-64674bd600d8?w=800&auto=format&fit=crop&q=80'} alt="Capa da Loja" className="w-full h-full object-cover opacity-50" />
+          
+          <div className="absolute top-3 right-3 flex items-center space-x-2 z-10">
+            <button
+              onClick={handleOpenMyOrders}
+              className="bg-gray-900/90 hover:bg-black text-white font-bold text-[10px] px-3 py-1.5 rounded-full border border-white/20 shadow-lg transition flex items-center space-x-1">
+              <span>📦 Meus Pedidos</span>
+            </button>
 
-          {formattedInstagramUrl && (
-            <a
-              href={formattedInstagramUrl}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="absolute top-3 left-3 bg-gradient-to-r from-purple-600 via-pink-600 to-orange-500 text-white font-bold text-[10px] sm:text-xs px-3 py-1.5 rounded-full shadow-lg transition flex items-center space-x-1 hover:opacity-90 z-10">
-              <span>📸 Instagram</span>
-            </a>
-          )}
+            {tenant.instagram_url && (
+              <a
+                href={tenant.instagram_url.startsWith('http') ? tenant.instagram_url : `https://${tenant.instagram_url}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="bg-gradient-to-r from-purple-600 via-pink-600 to-orange-500 text-white font-bold text-[10px] px-3 py-1.5 rounded-full shadow-lg transition flex items-center space-x-1 hover:opacity-90">
+                <span>📸 Instagram</span>
+              </a>
+            )}
+          </div>
 
-          <button
-            onClick={() => {
-              setShowMyAppsModal(true);
-              if (searchPhone) handleSearchMyAppointments();
-            }}
-            style={{ backgroundColor: primaryColor, color: btnTextColor }}
-            className="absolute top-3 right-3 font-bold text-[10px] sm:text-xs px-3 py-1.5 rounded-full shadow-lg transition z-10">
-            📋 Meus Agendamentos
-          </button>
-        </div>
-
-        {/* CABEÇALHO DO PROFISSIONAL / ESTABELECIMENTO */}
-        <div className="relative px-4 sm:px-2 -mt-8 sm:-mt-10 flex items-end space-x-3 sm:space-x-4 mb-4 z-10">
-          <img 
-            src={selectedProfObj?.avatar_url || tenant.logo_url || 'https://images.unsplash.com/photo-1585747860715-2ba37e788b70?w=150&auto=format&fit=crop&q=80'} 
-            alt="Foto Profissional" 
-            className="w-20 h-20 sm:w-24 sm:h-24 rounded-full border-4 shadow-xl object-cover bg-gray-800 shrink-0" 
-            style={{ borderColor: cardColor }}
-          />
-          <div className="pb-1">
-            <h1 className="font-bold text-lg sm:text-2xl leading-tight" style={{ color: textColor }}>
-              {selectedProfObj ? selectedProfObj.name : tenant.name}
-            </h1>
-            <p className="text-xs sm:text-sm opacity-80 font-medium">
-              {selectedProfObj?.specialty ? selectedProfObj.specialty : (selectedProfObj ? `💈 ${tenant.name}` : '📅 Agendamento Online')}
-            </p>
+          <div className="absolute -bottom-5 left-4 flex items-center space-x-3">
+            <img src={tenant.logo_url || 'https://images.unsplash.com/photo-1522335789203-aabd1fc54bc9?w=150&auto=format&fit=crop&q=80'} alt="Logo" className="w-16 h-16 rounded-full border-2 border-black/40 object-cover bg-gray-800 shadow-lg" />
+            <div className="pt-4">
+              <h1 className="font-bold text-lg leading-tight" style={{ color: textColor }}>{tenant.name}</h1>
+              <p className="text-[11px] opacity-70">🛍️ Catálogo Online & E-commerce</p>
+            </div>
           </div>
         </div>
 
-        <div className="px-4 sm:px-0 space-y-6">
-
-          {/* BANNER DE AVISO GERAL / MENSAGEM CUSTOMIZADA DO ESTABELECIMENTO */}
-          {tenant.custom_message && tenant.custom_message.trim() !== '' && (
-            <div 
-              style={{ backgroundColor: cardColor, color: textColor, borderColor: priceColor }} 
-              className="p-4 rounded-2xl border-l-4 shadow-sm space-y-1 text-xs">
-              <div className="flex items-center space-x-1.5 font-bold">
-                <span>📢</span>
-                <span style={{ color: priceColor }}>Aviso Importante</span>
-              </div>
-              <p className="opacity-90 leading-relaxed text-[11px] sm:text-xs">
-                {tenant.custom_message}
-              </p>
-            </div>
-          )}
-
-          {/* CARTÃO FIDELIDADE DIGITAL */}
-          {tenant.loyalty_enabled && customerPhone.replace(/\D/g, '').length >= 10 && (
-            <div 
-              style={{ backgroundColor: cardColor, color: textColor }} 
-              className="p-4 rounded-2xl border border-black/10 shadow-sm space-y-3">
-              <div className="flex justify-between items-center">
-                <div>
-                  <h4 className="font-bold text-xs flex items-center space-x-1" style={{ color: priceColor }}>
-                    <span>💳 Cartão Fidelidade</span>
-                  </h4>
-                  <p className="text-[10px] opacity-70">
-                    {isRewardReady 
-                      ? `🎉 Parabéns! Atingiu a meta. Resgate: ${tenant.loyalty_reward_text}` 
-                      : `Complete ${targetLoyaltyVisits} selos e ganhe: ${tenant.loyalty_reward_text}`}
-                  </p>
-                </div>
-                <span 
-                  className="text-xs font-bold px-2.5 py-1 rounded-lg border border-black/10" 
-                  style={{ backgroundColor: bgColor, color: textColor }}>
-                  {loyaltyCount}/{targetLoyaltyVisits}
-                </span>
+        {/* CARROSSEL AUTOMÁTICO DE BANNERS PROMOCIONAIS */}
+        {promoBannerList.length > 0 && (
+          <div className="mt-8 px-4">
+            <div className="relative rounded-2xl overflow-hidden border border-white/10 shadow-lg group">
+              <div 
+                className="flex transition-transform duration-500 ease-out"
+                style={{ transform: `translateX(-${currentBannerIndex * 100}%)` }}>
+                {promoBannerList.map((bannerUrl, idx) => (
+                  <img 
+                    key={idx} 
+                    src={bannerUrl} 
+                    alt={`Destaque ${idx + 1}`} 
+                    className="w-full h-36 object-cover shrink-0" 
+                  />
+                ))}
               </div>
 
-              {/* GRID DE SELOS */}
-              <div className="grid grid-cols-5 sm:grid-cols-10 gap-1.5 pt-1">
-                {Array.from({ length: targetLoyaltyVisits }).map((_, index) => {
-                  const isStamped = index < loyaltyCount;
-                  return (
-                    <div
-                      key={index}
-                      style={{
-                        backgroundColor: isStamped ? primaryColor : bgColor,
-                        color: isStamped ? btnTextColor : textColor,
-                        borderColor: 'rgba(0,0,0,0.1)'
-                      }}
-                      className={`h-8 sm:h-9 rounded-xl flex items-center justify-center text-xs font-bold border transition-all ${
-                        isStamped ? 'shadow-md scale-105' : 'opacity-40'
-                      }`}
-                    >
-                      {isStamped ? '✂️' : index + 1}
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
-          )}
-
-          {/* PASSO 1: ESCOLHA O PROFISSIONAL */}
-          {professionals.length > 1 && (
-            <div className="space-y-2">
-              <label className="text-xs font-bold block uppercase tracking-wider opacity-80">1. Escolha a Profissional</label>
-              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2.5 sm:gap-3">
-                {professionals.map(p => {
-                  const isSelected = String(selectedProf) === String(p.id);
-
-                  return (
+              {promoBannerList.length > 1 && (
+                <div className="absolute bottom-2 inset-x-0 flex justify-center space-x-1.5 z-10">
+                  {promoBannerList.map((_, idx) => (
                     <button
-                      type="button"
-                      key={p.id}
-                      onClick={() => handleSelectProf(p.id)}
-                      style={{ 
-                        backgroundColor: isSelected ? primaryColor : cardColor,
-                        color: isSelected ? btnTextColor : textColor,
-                        borderColor: isSelected ? primaryColor : 'rgba(0,0,0,0.1)'
-                      }}
-                      className="p-3 rounded-2xl border flex items-center space-x-2.5 text-left transition shadow-md relative overflow-hidden">
-                      <img 
-                        src={p.avatar_url || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=100&auto=format&fit=crop&q=80'} 
-                        alt={p.name} 
-                        className="w-10 h-10 rounded-full object-cover border border-black/20 shrink-0 bg-gray-800" 
-                      />
-                      <div className="truncate">
-                        <span className="font-bold text-xs block truncate">{p.name}</span>
-                        <span className="text-[10px] opacity-80 block truncate font-medium">
-                          {p.specialty || 'Atendimento'}
-                        </span>
-                      </div>
-                      {isSelected && (
-                        <span className="absolute top-1.5 right-2 text-[10px] font-bold">✓</span>
-                      )}
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
-          )}
-
-          {/* PASSO 2: ESCOLHA O SERVIÇO (ORGANIZADO POR CATEGORIA) */}
-          {selectedProf ? (
-            <div className="space-y-4 pt-2 border-t border-black/10">
-              <div className="flex justify-between items-center">
-                <label className="text-xs font-bold block uppercase tracking-wider opacity-80">
-                  {professionals.length > 1 ? `2. Serviço de ${selectedProfObj?.name}` : `1. Escolha o Serviço de ${selectedProfObj?.name}`}
-                </label>
-                {selectedServices.length > 0 && (
-                  <span className="text-[10px] font-bold opacity-80" style={{ color: priceColor }}>
-                    1 selecionado ({formatDuration(totalDuration)})
-                  </span>
-                )}
-              </div>
-
-              {displayedServices.length === 0 ? (
-                <p className="text-xs opacity-60 p-4 rounded-xl text-center border border-black/10" style={{ backgroundColor: cardColor, color: textColor }}>
-                  Nenhum serviço cadastrado para esta profissional.
-                </p>
-              ) : (
-                <div className="space-y-5">
-                  {Object.entries(groupedServices).map(([categoryName, categoryServices]) => (
-                    <div key={categoryName} className="space-y-2">
-                      <h4 className="text-[11px] font-bold uppercase tracking-wider opacity-70 border-b border-black/10 pb-1 flex items-center space-x-1" style={{ color: priceColor }}>
-                        <span>📁</span>
-                        <span>{categoryName}</span>
-                      </h4>
-
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-2.5">
-                        {categoryServices.map(srv => {
-                          const isSelected = selectedServices.some(s => s.id === srv.id);
-                          const serviceImg = srv.image_url || srv.image;
-
-                          return (
-                            <div
-                              key={srv.id}
-                              onClick={() => handleToggleService(srv)}
-                              style={{
-                                backgroundColor: cardColor,
-                                borderColor: isSelected ? primaryColor : 'rgba(0,0,0,0.1)',
-                                color: textColor
-                              }}
-                              className="p-3 rounded-xl border flex justify-between items-center cursor-pointer transition shadow-sm hover:opacity-95">
-                              <div className="flex items-center space-x-3">
-                                {serviceImg && (
-                                  <img 
-                                    src={serviceImg} 
-                                    alt={srv.name} 
-                                    className="w-12 h-12 rounded-xl object-cover border border-black/10 bg-gray-800 shrink-0" 
-                                  />
-                                )}
-                                <div>
-                                  <h3 className="font-bold text-xs">{srv.name}</h3>
-                                  <p className="text-[10px] opacity-60">⏱️ {formatDuration(srv.duration_minutes)}</p>
-                                </div>
-                              </div>
-                              <div className="text-right">
-                                <span className="font-bold text-xs block" style={{ color: priceColor }}>
-                                  R$ {Number(srv.price).toFixed(2)}
-                                </span>
-                                <span className="block text-[10px] font-bold mt-0.5" style={{ color: isSelected ? priceColor : 'rgba(0,0,0,0.4)' }}>
-                                  {isSelected ? '✓ Selecionado' : 'Selecionar'}
-                                </span>
-                              </div>
-                            </div>
-                          );
-                        })}
-                      </div>
-                    </div>
+                      key={idx}
+                      onClick={() => setCurrentBannerIndex(idx)}
+                      style={{ backgroundColor: currentBannerIndex === idx ? primaryColor : 'rgba(255,255,255,0.4)' }}
+                      className={`h-1.5 rounded-full transition-all ${currentBannerIndex === idx ? 'w-5' : 'w-1.5'}`}
+                    />
                   ))}
                 </div>
               )}
             </div>
-          ) : (
-            <div className="p-4 rounded-2xl border border-dashed border-black/20 text-center" style={{ backgroundColor: cardColor, color: textColor }}>
-              <span className="text-lg block mb-1">👆</span>
-              <p className="text-xs opacity-60">Selecione uma profissional acima para ver os serviços e valores.</p>
-            </div>
-          )}
+          </div>
+        )}
 
-          {/* PASSO 3: DATA E HORÁRIO */}
-          {selectedProf && selectedServices.length > 0 && (
-            <div className="space-y-4 pt-2 border-t border-black/10">
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div className="space-y-2">
-                  <label className="text-xs font-bold block uppercase tracking-wider opacity-80">
-                    {professionals.length > 1 ? '3. Escolha a Data' : '2. Escolha a Data'}
-                  </label>
-                  <input
-                    type="date"
-                    min={getTodayLocal()}
-                    value={selectedDate}
-                    onChange={(e) => {
-                      setSelectedDate(e.target.value);
-                      setSelectedTime('');
-                    }}
-                    style={{ backgroundColor: cardColor, color: textColor }}
-                    className="w-full border border-black/10 p-3 rounded-xl text-xs focus:outline-none cursor-pointer shadow-sm"
-                  />
+        {/* CATEGORIAS + ABA DE PROMOÇÕES */}
+        <div className={`${promoBannerList.length > 0 ? 'mt-4' : 'mt-8'} px-4`}>
+          <div className="flex space-x-2 overflow-x-auto pb-2 scrollbar-none">
+            <button
+              onClick={() => setSelectedCat('ALL')}
+              style={{ 
+                backgroundColor: selectedCat === 'ALL' ? primaryColor : cardColor,
+                color: selectedCat === 'ALL' ? btnTextColor : textColor
+              }}
+              className="px-3.5 py-1.5 rounded-full text-xs font-bold whitespace-nowrap border border-white/10 transition">
+              Todos
+            </button>
 
-                  {/* BANNER DE AVISO ESPECÍFICO DO DIA SELECIONADO (SE HOUVER) */}
-                  {currentDayNotice && currentDayNotice.trim() !== '' && (
-                    <div 
-                      style={{ backgroundColor: cardColor, color: textColor, borderColor: priceColor }} 
-                      className="p-3.5 rounded-xl border-l-4 shadow-sm space-y-1 text-xs animate-fadeIn">
-                      <div className="flex items-center space-x-1.5 font-bold">
-                        <span>⚠️</span>
-                        <span style={{ color: priceColor }}>Aviso para {DAY_NAMES[selectedDayOfWeek]}</span>
-                      </div>
-                      <p className="opacity-90 leading-relaxed text-[11px] sm:text-xs">
-                        {currentDayNotice}
-                      </p>
-                    </div>
+            {promoProductsCount > 0 && (
+              <button
+                onClick={() => setSelectedCat('OFFERS')}
+                className={`px-3.5 py-1.5 rounded-full text-xs font-bold whitespace-nowrap border transition flex items-center space-x-1 ${
+                  selectedCat === 'OFFERS' 
+                    ? 'bg-gradient-to-r from-red-600 to-orange-500 text-white border-red-500 shadow-lg' 
+                    : 'bg-red-500/10 text-red-400 border-red-500/30 hover:bg-red-500/20'
+                }`}>
+                <span>🔥 Promoções ({promoProductsCount})</span>
+              </button>
+            )}
+
+            {categories.map(c => {
+              const isSelected = String(selectedCat) === String(c.id);
+              return (
+                <button
+                  key={c.id}
+                  onClick={() => setSelectedCat(c.id)}
+                  style={{ 
+                    backgroundColor: isSelected ? primaryColor : cardColor,
+                    color: isSelected ? btnTextColor : textColor
+                  }}
+                  className="px-3.5 py-1.5 rounded-full text-xs font-bold whitespace-nowrap border border-white/10 transition">
+                  {c.name}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
+        {/* GRID DE PRODUTOS */}
+        <div className="mt-4 px-4 grid grid-cols-2 gap-3">
+          {filteredProducts.map(p => {
+            const hasPromo = p.original_price && Number(p.original_price) > Number(p.price);
+            const discPercent = hasPromo ? Math.round(((Number(p.original_price) - Number(p.price)) / Number(p.original_price)) * 100) : 0;
+
+            return (
+              <div 
+                key={p.id} 
+                onClick={() => handleOpenProductModal(p)}
+                style={{ backgroundColor: cardColor }} 
+                className="p-3 rounded-2xl border border-white/10 flex flex-col justify-between cursor-pointer hover:border-white/20 transition relative group">
+                
+                <div className="absolute top-2.5 right-2.5 z-10 flex flex-col items-end space-y-1">
+                  {hasPromo && (
+                    <span className="bg-gradient-to-r from-red-600 to-orange-500 text-white font-extrabold text-[9px] px-2 py-0.5 rounded-full shadow-lg border border-white/20 uppercase tracking-wider animate-pulse">
+                      -{discPercent}% OFF
+                    </span>
+                  )}
+                  {p.is_digital && (
+                    <span className="bg-blue-600/90 text-white font-extrabold text-[8px] px-2 py-0.5 rounded-full shadow border border-blue-400/30 uppercase tracking-wider">
+                      ⚡ Digital
+                    </span>
                   )}
                 </div>
 
-                <div className="space-y-1">
-                  <label className="text-xs font-bold block uppercase tracking-wider opacity-80">
-                    {professionals.length > 1 ? `4. Horários Disponíveis (${availableSlots.length})` : `3. Horários Disponíveis (${availableSlots.length})`}
-                  </label>
-                  
-                  {slotData.status !== 'ok' ? (
-                    <p className="text-xs text-red-500 bg-red-500/10 p-3 rounded-xl border border-red-500/20 text-center font-semibold">
-                      {slotData.message}
-                    </p>
-                  ) : availableSlots.length === 0 ? (
-                    <div className="text-xs text-red-500 bg-red-500/10 p-3.5 rounded-xl border border-red-500/20 text-center space-y-1">
-                      <p className="font-bold">Nenhum horário disponível nesta data para este procedimento.</p>
+                <div>
+                  <div className="relative overflow-hidden rounded-xl mb-2">
+                    <img src={p.image || 'https://images.unsplash.com/photo-1523275335684-37898b6baf30?w=300&auto=format&fit=crop&q=80'} alt={p.name} className="w-full h-28 object-cover border border-white/10 bg-gray-800" />
+                  </div>
+                  <h3 className="font-bold text-xs line-clamp-2 leading-snug h-8" style={{ color: textColor }}>{p.name}</h3>
+                  <p className="text-[10px] opacity-60 line-clamp-2 h-7 mt-1">{p.description}</p>
+                </div>
+
+                <div className="mt-2 pt-2 border-t border-white/10 flex justify-between items-end">
+                  <div>
+                    {hasPromo && (
+                      <span className="text-[10px] opacity-50 line-through block leading-tight">
+                        R$ {Number(p.original_price).toFixed(2)}
+                      </span>
+                    )}
+                    <span className={`font-bold text-xs block ${hasPromo ? 'text-red-400 font-extrabold' : ''}`} style={{ color: hasPromo ? '#f87171' : primaryColor }}>
+                      R$ {Number(p.price).toFixed(2)}
+                    </span>
+                  </div>
+
+                  <button style={{ backgroundColor: primaryColor, color: btnTextColor }} className="px-2 py-1 rounded-lg text-[10px] font-bold transition shadow shrink-0">
+                    Ver
+                  </button>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* RODAPÉ PROFISSIONAL (FOOTER) */}
+      <footer className="mt-12 border-t border-white/10 pt-8 pb-12 px-4 text-center space-y-3 opacity-90">
+        <div className="flex justify-center items-center space-x-2">
+          <img src={tenant.logo_url || 'https://images.unsplash.com/photo-1522335789203-aabd1fc54bc9?w=150&auto=format&fit=crop&q=80'} alt="Logo" className="w-7 h-7 rounded-full object-cover border border-white/20" />
+          <span className="font-extrabold text-sm tracking-wide" style={{ color: textColor }}>{tenant.name}</span>
+        </div>
+
+        <p className="text-[11px] opacity-60 max-w-xs mx-auto leading-relaxed">
+          Atendimento de Seg. a Sáb. das {tenant.opening_time || '08:00'} às {tenant.closing_time || '18:00'}.
+        </p>
+
+        <div className="pt-2 border-t border-white/5 flex flex-col items-center space-y-1 text-[10px] opacity-50">
+          <p>© {new Date().getFullYear()} {tenant.name}. Todos os direitos reservados.</p>
+          <p className="font-medium tracking-wider">
+            Desenvolvido por <span className="text-orange-400 font-bold hover:underline cursor-pointer">SinergeMKT</span>
+          </p>
+        </div>
+      </footer>
+
+      {/* ÍCONE FLUTUANTE DO WHATSAPP (FIXO NA TELA) */}
+      {cleanTenantWhatsapp && (
+        <a
+          href={`https://wa.me/${cleanTenantWhatsapp}?text=${encodeURIComponent("Olá! Vim pelo catálogo e gostaria de tirar uma dúvida.")}`}
+          target="_blank"
+          rel="noopener noreferrer"
+          style={{ bottom: cart.length > 0 ? '5.5rem' : '1.25rem' }}
+          className="fixed right-4 z-40 bg-[#25D366] text-white p-3.5 rounded-full shadow-2xl transition-all duration-300 hover:scale-110 flex items-center justify-center border-2 border-white/20 group">
+          <svg className="w-6 h-6 fill-current" viewBox="0 0 24 24">
+            <path d="M.057 24l1.687-6.163c-1.041-1.804-1.588-3.849-1.587-5.946.003-6.556 5.338-11.891 11.893-11.891 3.181.001 6.167 1.24 8.413 3.488 2.245 2.248 3.481 5.236 3.48 8.414-.003 6.557-5.338 11.892-11.893 11.892-1.99-.001-3.951-.5-5.688-1.448l-6.305 1.654zm6.597-3.807c1.676.995 3.276 1.591 5.392 1.592 5.448 0 9.886-4.434 9.889-9.885.002-5.462-4.415-9.89-9.881-9.892-5.452 0-9.887 4.434-9.889 9.884-.001 2.225.651 3.891 1.746 5.634l-.999 3.648 3.742-.981zm11.387-5.464c-.074-.124-.272-.198-.57-.347-.297-.149-1.758-.868-2.031-.967-.272-.099-.47-.149-.669.149-.198.297-.768.967-.941 1.165-.173.198-.347.223-.644.074-.297-.149-1.255-.462-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.297-.347.446-.521.151-.172.2-.296.3-.495.099-.198.05-.372-.025-.521-.075-.148-.669-1.611-.916-2.206-.242-.579-.487-.501-.669-.51l-.57-.01c-.198 0-.52.074-.792.372s-1.04 1.016-1.04 2.479 1.065 2.876 1.213 3.074c.149.198 2.095 3.2 5.076 4.487.709.306 1.263.489 1.694.626.712.226 1.36.194 1.872.118.571-.085 1.758-.719 2.006-1.413.248-.695.248-1.29.173-1.414z"/>
+          </svg>
+          <span className="absolute right-14 bg-black/80 text-white text-[10px] font-bold px-2.5 py-1 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap shadow-lg pointer-events-none">
+            Falar no WhatsApp
+          </span>
+        </a>
+      )}
+
+      {/* BARRA DO CARRINHO FLUTUANTE */}
+      {cart.length > 0 && (
+        <div className="fixed bottom-4 left-4 right-4 max-w-md mx-auto z-40">
+          <button
+            onClick={() => setShowCartModal(true)}
+            style={{ backgroundColor: primaryColor, color: btnTextColor }}
+            className="w-full font-bold p-3.5 rounded-2xl flex justify-between items-center shadow-2xl transition hover:opacity-95">
+            <span className="text-xs bg-black/20 px-2.5 py-1 rounded-lg">🛍️ {cart.reduce((a, b) => a + b.quantity, 0)} itens</span>
+            <span className="text-xs font-bold uppercase tracking-wider">Finalizar Compra</span>
+            <span className="text-xs font-bold">R$ {total.toFixed(2)}</span>
+          </button>
+        </div>
+      )}
+
+      {/* MODAL MEUS PEDIDOS */}
+      {showMyOrdersModal && (
+        <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 p-4">
+          <div style={{ backgroundColor: cardColor, color: textColor }} className="border border-white/10 w-full max-w-sm rounded-2xl p-5 space-y-4 shadow-2xl max-h-[90vh] overflow-y-auto">
+            <div className="flex justify-between items-center border-b border-white/10 pb-2">
+              <h3 className="font-bold text-sm" style={{ color: primaryColor }}>📦 Meus Pedidos Recentes</h3>
+              <button onClick={() => setShowMyOrdersModal(false)} className="opacity-60 font-bold text-xs">✕ Fechar</button>
+            </div>
+
+            {loadingMyOrders ? (
+              <p className="text-xs text-gray-400 text-center py-6">Carregando seus pedidos...</p>
+            ) : myOrdersList.length === 0 ? (
+              <div className="text-center py-6 space-y-2">
+                <span className="text-3xl block">🛍️</span>
+                <p className="text-xs text-gray-400 font-bold">Nenhum pedido encontrado neste dispositivo.</p>
+                <p className="text-[10px] text-gray-500">Seus pedidos recentes aparecerão aqui automaticamente.</p>
+              </div>
+            ) : (
+              <div className="space-y-3">
+                {myOrdersList.map(ord => {
+                  const isPaid = ord.is_paid || ord.payment_method?.includes('PAGO');
+                  return (
+                    <div key={ord.id} style={{ backgroundColor: bgColor }} className="p-3.5 rounded-xl border border-white/10 space-y-2 text-xs">
+                      <div className="flex justify-between items-start">
+                        <div>
+                          <span className="font-bold text-white block">PEDIDO #{ord.id}</span>
+                          <span className="text-[10px] text-gray-400 block">{new Date(ord.created_at || Date.now()).toLocaleDateString('pt-BR')}</span>
+                        </div>
+                        <span className={`text-[9px] font-bold px-2 py-0.5 rounded-md border ${
+                          isPaid ? 'bg-green-500/20 text-green-400 border-green-500/30' : 'bg-yellow-500/20 text-yellow-400 border-yellow-500/30'
+                        }`}>
+                          {isPaid ? '🟢 PAGO' : '🟡 PENDENTE'}
+                        </span>
+                      </div>
+
+                      <div className="flex justify-between items-center pt-2 border-t border-white/5">
+                        <span className="font-bold text-white">Total: R$ {Number(ord.total).toFixed(2)}</span>
+                        <button
+                          onClick={() => {
+                            setShowMyOrdersModal(false);
+                            router.push(`/${slug}/pedido/${ord.id}`);
+                          }}
+                          style={{ backgroundColor: primaryColor, color: btnTextColor }}
+                          className="px-3 py-1.5 rounded-lg font-bold text-[10px] transition shadow">
+                          🔎 Acompanhar Pedido
+                        </button>
+                      </div>
                     </div>
-                  ) : (
-                    <div className="grid grid-cols-4 sm:grid-cols-6 md:grid-cols-4 gap-2 max-h-48 overflow-y-auto pt-1">
-                      {availableSlots.map(slot => {
-                        const isSelected = selectedTime === slot;
-                        return (
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* MODAL DE DETALHES DO PRODUTO */}
+      {selectedProduct && (
+        <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 p-4">
+          <div style={{ backgroundColor: cardColor, color: textColor }} className="border border-white/10 w-full max-w-sm rounded-2xl p-5 space-y-4 shadow-2xl max-h-[90vh] overflow-y-auto">
+            <div className="flex justify-between items-start border-b border-white/10 pb-2 gap-2">
+              <div className="flex-1">
+                <div className="flex items-center space-x-2">
+                  <h3 className="font-bold text-sm leading-snug" style={{ color: primaryColor }}>{selectedProduct.name}</h3>
+                  {selectedProduct.is_digital && (
+                    <span className="bg-blue-500/20 text-blue-400 border border-blue-500/30 text-[9px] font-bold px-2 py-0.5 rounded-md shrink-0">⚡ Digital</span>
+                  )}
+                </div>
+                {selectedProductHasPromo && (
+                  <span className="inline-block bg-red-500/20 text-red-400 border border-red-500/30 text-[10px] font-bold px-2 py-0.5 rounded-md mt-1">
+                    🔥 OFERTA ESPECIAL — ECONOMIZE R$ {selectedProductSavings.toFixed(2)}
+                  </span>
+                )}
+              </div>
+              <button onClick={() => setSelectedProduct(null)} className="opacity-60 hover:opacity-100 font-bold text-xs shrink-0 pt-0.5">✕ Fechar</button>
+            </div>
+
+            <div className="relative">
+              <img src={activeImage} alt={selectedProduct.name} className="w-full h-44 rounded-xl object-cover border border-white/10 bg-gray-900" />
+              {selectedProductHasPromo && (
+                <span className="absolute top-2 right-2 bg-gradient-to-r from-red-600 to-orange-500 text-white font-extrabold text-xs px-2.5 py-1 rounded-full shadow-lg border border-white/20">
+                  -{Math.round(((Number(selectedProduct.original_price) - Number(selectedProduct.price)) / Number(selectedProduct.original_price)) * 100)}% OFF
+                </span>
+              )}
+            </div>
+            
+            {productGallery.length > 1 && (
+              <div className="flex space-x-2 overflow-x-auto pb-1 scrollbar-none">
+                {productGallery.map((imgUrl, idx) => (
+                  <button
+                    key={idx}
+                    type="button"
+                    onClick={() => setActiveImage(imgUrl)}
+                    style={{ borderColor: activeImage === imgUrl ? primaryColor : 'rgba(255,255,255,0.1)' }}
+                    className={`w-12 h-12 rounded-lg border-2 overflow-hidden shrink-0 transition ${activeImage === imgUrl ? 'scale-105' : 'opacity-60'}`}>
+                    <img src={imgUrl} alt={`Foto ${idx + 1}`} className="w-full h-full object-cover" />
+                  </button>
+                ))}
+              </div>
+            )}
+
+            <div className="space-y-1">
+              <div className="flex items-baseline space-x-2">
+                <span className="text-xl font-extrabold block" style={{ color: selectedProductHasPromo ? '#f87171' : primaryColor }}>
+                  R$ {Number(selectedProduct.price).toFixed(2)}
+                </span>
+                {selectedProductHasPromo && (
+                  <span className="text-xs text-gray-500 line-through">
+                    R$ {Number(selectedProduct.original_price).toFixed(2)}
+                  </span>
+                )}
+              </div>
+              <p className="text-xs opacity-70">{selectedProduct.description}</p>
+            </div>
+
+            {selectedProduct.is_digital && (
+              <div className="bg-blue-500/10 border border-blue-500/20 p-2.5 rounded-xl text-xs text-blue-300">
+                ⚡ <b>Produto Digital:</b> Acesso imediato liberado após confirmação do pagamento. Não exige envio físico.
+              </div>
+            )}
+
+            {hasCustomVariations && selectedProduct.variations_json.map((v, idx) => (
+              <div key={idx} className="space-y-2 pt-2 border-t border-white/10">
+                <label className="text-xs font-bold block opacity-80">🏷️ Selecione: {v.attribute_name}</label>
+                <div className="flex flex-wrap gap-2">
+                  {v.options.map((opt) => {
+                    const isSelected = selectedVariations[v.attribute_name] === opt;
+                    return (
+                      <button
+                        key={opt}
+                        type="button"
+                        onClick={() => handleSelectVariation(v.attribute_name, opt)}
+                        style={{
+                          backgroundColor: isSelected ? primaryColor : bgColor,
+                          color: isSelected ? btnTextColor : textColor,
+                          borderColor: isSelected ? primaryColor : 'rgba(255,255,255,0.1)'
+                        }}
+                        className="px-3 py-2 rounded-xl text-xs font-bold border transition text-center">
+                        {opt}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            ))}
+
+            {isFashionFallback && (
+              <div className="space-y-2 pt-2 border-t border-white/10">
+                <label className="text-xs font-bold block opacity-80">🏷️ Selecione o Tamanho da Peça:</label>
+                <div className="grid grid-cols-5 gap-2">
+                  {DEFAULT_FASHION_SIZES.map(size => {
+                    const isSelected = selectedVariations['Tamanho'] === size;
+                    return (
+                      <button
+                        key={size}
+                        type="button"
+                        onClick={() => handleSelectVariation('Tamanho', size)}
+                        style={{
+                          backgroundColor: isSelected ? primaryColor : bgColor,
+                          color: isSelected ? btnTextColor : textColor,
+                          borderColor: isSelected ? primaryColor : 'rgba(255,255,255,0.1)'
+                        }}
+                        className="py-2 rounded-xl text-xs font-bold border transition text-center">
+                        {size}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+
+            <div className="space-y-1 pt-1">
+              <label className="text-xs font-bold block opacity-80">📝 Observação (Opcional):</label>
+              <input
+                type="text"
+                placeholder="Ex: Embalar para presente, instrução de envio..."
+                value={productNote}
+                onChange={(e) => setProductNote(e.target.value)}
+                style={{ backgroundColor: bgColor, color: textColor }}
+                className="w-full border border-white/10 p-2.5 rounded-xl text-xs focus:outline-none"
+              />
+            </div>
+
+            <div className="flex items-center space-x-3 pt-2">
+              <div className="flex items-center space-x-2 bg-black/30 p-1 rounded-xl border border-white/10">
+                <button onClick={() => setProductQuantity(Math.max(1, productQuantity - 1))} className="w-8 h-8 rounded-lg bg-gray-800 text-white font-bold text-sm">-</button>
+                <span className="font-bold px-2">{productQuantity}</span>
+                <button onClick={() => setProductQuantity(productQuantity + 1)} style={{ backgroundColor: primaryColor, color: btnTextColor }} className="w-8 h-8 rounded-lg font-bold text-sm">+</button>
+              </div>
+
+              <button
+                onClick={handleAddProductToCart}
+                style={{ backgroundColor: primaryColor, color: btnTextColor }}
+                className="flex-1 font-bold py-3 rounded-xl text-xs shadow-lg transition">
+                Adicionar • R$ {(Number(selectedProduct.price) * productQuantity).toFixed(2)}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL DO CARRINHO & CHECKOUT */}
+      {showCartModal && (
+        <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 p-4">
+          <div style={{ backgroundColor: cardColor, color: textColor }} className="border border-white/10 w-full max-w-sm rounded-2xl p-5 space-y-4 shadow-2xl max-h-[90vh] overflow-y-auto">
+            <div className="flex justify-between items-center border-b border-white/10 pb-2">
+              <h3 className="font-bold text-sm" style={{ color: primaryColor }}>🛍️ Sacola de Compras</h3>
+              <button onClick={() => setShowCartModal(false)} className="opacity-60 font-bold text-xs">✕ Fechar</button>
+            </div>
+
+            {!isAllDigital && freeThreshold > 0 && (
+              <div 
+                className="text-[11px] p-2.5 rounded-xl font-bold text-center border transition"
+                style={{ 
+                  backgroundColor: isFreeShipping ? 'rgba(34, 197, 94, 0.15)' : 'rgba(255, 255, 255, 0.05)',
+                  borderColor: isFreeShipping ? 'rgba(34, 197, 94, 0.4)' : 'rgba(255, 255, 255, 0.1)',
+                  color: isFreeShipping ? '#4ade80' : textColor
+                }}>
+                {isFreeShipping ? (
+                  <span>🎉 Parabéns! Você ganhou <b>FRETE GRÁTIS</b>!</span>
+                ) : (
+                  <span>Faltam <b>R$ {(freeThreshold - subtotal).toFixed(2)}</b> para você ganhar <b>FRETE GRÁTIS</b>!</span>
+                )}
+              </div>
+            )}
+
+            {isAllDigital && (
+              <div className="bg-blue-500/15 border border-blue-500/30 text-blue-300 text-[11px] p-2.5 rounded-xl font-bold text-center">
+                ⚡ Seus produtos são <b>100% Digitais</b>! Isenção total de taxa de frete.
+              </div>
+            )}
+
+            <div className="space-y-2 max-h-48 overflow-y-auto">
+              {cart.map(item => (
+                <div key={item.cartItemId} style={{ backgroundColor: bgColor }} className="p-2.5 rounded-xl border border-white/10 flex justify-between items-start text-xs space-x-2">
+                  <div className="flex-1">
+                    <div className="flex items-center space-x-1.5">
+                      <span className="font-bold block">{item.quantity}x {item.name}</span>
+                      {item.is_digital && <span className="bg-blue-500/20 text-blue-400 text-[9px] font-bold px-1.5 py-0.2 rounded">⚡ Digital</span>}
+                    </div>
+                    {item.variationsText && (
+                      <span className="text-[10px] font-bold text-orange-400 block">{item.variationsText}</span>
+                    )}
+                    {item.note && (
+                      <p className="text-[10px] opacity-60 italic">Obs: "{item.note}"</p>
+                    )}
+                    <span style={{ color: primaryColor }} className="font-bold block mt-0.5">R$ {(Number(item.price) * item.quantity).toFixed(2)}</span>
+                  </div>
+
+                  <button onClick={() => removeFromCart(item.cartItemId)} className="text-red-400 font-bold text-xs p-1">🗑</button>
+                </div>
+              ))}
+            </div>
+
+            <form onSubmit={handleApplyCoupon} className="pt-2 border-t border-white/10 space-y-1.5">
+              <label className="text-[11px] opacity-70 block">🎟️ Possui um Cupom de Desconto?</label>
+              <div className="flex space-x-2">
+                <input
+                  type="text"
+                  placeholder="Ex: PRIMEIRA10"
+                  value={couponInput}
+                  onChange={(e) => setCouponInput(e.target.value)}
+                  style={{ backgroundColor: bgColor, color: textColor }}
+                  className="flex-1 uppercase border border-white/10 p-2 rounded-xl text-xs focus:outline-none"
+                />
+                <button
+                  type="submit"
+                  style={{ backgroundColor: primaryColor, color: btnTextColor }}
+                  className="px-3 py-2 rounded-xl text-xs font-bold transition">
+                  Aplicar
+                </button>
+              </div>
+              {couponMessage.text && (
+                <p className={`text-[10px] font-bold ${couponMessage.type === 'success' ? 'text-green-400' : 'text-red-400'}`}>
+                  {couponMessage.text}
+                </p>
+              )}
+            </form>
+
+            <form onSubmit={handleFinishOrder} className="space-y-3 pt-2 border-t border-white/10">
+              
+              {/* OPÇÕES DE ENTREGA OCULTAS SE TUDO FOR DIGITAL */}
+              {!isAllDigital && (
+                <>
+                  <div className="flex space-x-2">
+                    <button
+                      type="button"
+                      onClick={() => setDeliveryType('ENTREGA')}
+                      style={{ 
+                        backgroundColor: deliveryType === 'ENTREGA' ? primaryColor : bgColor,
+                        color: deliveryType === 'ENTREGA' ? btnTextColor : textColor
+                      }}
+                      className={`py-2 rounded-xl text-xs font-bold border border-white/10 ${allowPickup ? 'w-1/2' : 'w-full'}`}>
+                      🛵 Entrega {isFreeShipping ? '(GRÁTIS)' : ''}
+                    </button>
+
+                    {allowPickup && (
+                      <button
+                        type="button"
+                        onClick={() => setDeliveryType('RETIRADA')}
+                        style={{ 
+                          backgroundColor: deliveryType === 'RETIRADA' ? primaryColor : bgColor,
+                          color: deliveryType === 'RETIRADA' ? btnTextColor : textColor
+                        }}
+                        className="w-1/2 py-2 rounded-xl text-xs font-bold border border-white/10">
+                        🏪 Retirar na Loja
+                      </button>
+                    )}
+                  </div>
+
+                  {deliveryType === 'ENTREGA' && (
+                    <>
+                      {shippingMode === 'hybrid' && (
+                        <div className="flex space-x-2 mb-2 bg-black/40 p-1 rounded-xl border border-white/10">
                           <button
                             type="button"
-                            key={slot}
-                            onClick={() => setSelectedTime(slot)}
-                            style={{ 
-                              backgroundColor: isSelected ? primaryColor : cardColor,
-                              color: isSelected ? btnTextColor : textColor
-                            }}
-                            className="py-2 rounded-lg border border-black/10 text-xs font-bold text-center transition shadow-sm hover:scale-105">
-                            {slot}
+                            onClick={() => setHybridOption('bairro')}
+                            className={`flex-1 py-1.5 rounded-lg text-[10px] font-bold transition ${
+                              hybridOption === 'bairro' ? 'bg-orange-500 text-white shadow' : 'text-gray-400 hover:text-white'
+                            }`}>
+                            🛵 Entrega por Bairro
                           </button>
-                        );
-                      })}
-                    </div>
+                          <button
+                            type="button"
+                            onClick={() => setHybridOption('cep')}
+                            className={`flex-1 py-1.5 rounded-lg text-[10px] font-bold transition ${
+                              hybridOption === 'cep' ? 'bg-orange-500 text-white shadow' : 'text-gray-400 hover:text-white'
+                            }`}>
+                            📦 Envio por CEP
+                          </button>
+                        </div>
+                      )}
+
+                      {(shippingMode === 'national' || (shippingMode === 'hybrid' && hybridOption === 'cep')) && (
+                        <div className="space-y-2 p-3 rounded-xl border border-white/10 bg-black/20">
+                          <label className="text-[11px] font-bold block text-orange-400">📦 Digite seu CEP para calcular o Frete:</label>
+                          <div className="flex space-x-2">
+                            <input
+                              type="text"
+                              placeholder="Ex: 01001-000"
+                              value={destinationCep}
+                              onChange={(e) => {
+                                const val = e.target.value;
+                                setDestinationCep(val);
+                                const cleanVal = val.replace(/\D/g, '');
+
+                                if (cleanVal.length === 8) {
+                                  handleCalculateCep(val);
+                                } else {
+                                  setCalculatedOptions([]);
+                                  setSelectedShippingOption(null);
+                                  setCepError('');
+                                }
+                              }}
+                              style={{ backgroundColor: bgColor, color: textColor }}
+                              className="flex-1 border border-white/10 p-2 rounded-xl text-xs font-mono focus:outline-none"
+                            />
+                            <button
+                              type="button"
+                              onClick={() => handleCalculateCep()}
+                              disabled={isCalculatingCep}
+                              style={{ backgroundColor: primaryColor, color: btnTextColor }}
+                              className="px-3 py-2 rounded-xl text-xs font-bold transition">
+                              {isCalculatingCep ? 'Calculando...' : 'Calcular'}
+                            </button>
+                          </div>
+
+                          {cepError && <p className="text-[10px] text-red-400 font-bold">{cepError}</p>}
+
+                          {calculatedOptions.length > 0 && (
+                            <div className="space-y-1.5 pt-2">
+                              <label className="text-[10px] opacity-70 block">Opções de Envio Disponíveis:</label>
+                              {calculatedOptions.map(opt => (
+                                <label
+                                  key={opt.id}
+                                  className={`flex justify-between items-center p-2 rounded-xl border text-xs cursor-pointer transition ${
+                                    selectedShippingOption?.id === opt.id ? 'border-orange-500 bg-orange-500/10' : 'border-white/10 bg-black/30'
+                                  }`}>
+                                  <div className="flex items-center space-x-2">
+                                    <input
+                                      type="radio"
+                                      name="shippingOption"
+                                      checked={selectedShippingOption?.id === opt.id}
+                                      onChange={() => setSelectedShippingOption(opt)}
+                                      className="accent-orange-500"
+                                    />
+                                    <div>
+                                      <span className="font-bold block text-white">{opt.name}</span>
+                                      <span className="text-[10px] opacity-60">Prazo: {opt.time}</span>
+                                    </div>
+                                  </div>
+                                  <span className="font-bold text-orange-400">
+                                    {opt.fee === 0 ? 'GRÁTIS' : `R$ ${opt.fee.toFixed(2)}`}
+                                  </span>
+                                </label>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      )}
+
+                      {(shippingMode === 'local' || (shippingMode === 'hybrid' && hybridOption === 'bairro')) && (
+                        <div>
+                          <label className="text-[11px] opacity-70 block mb-1">Selecione seu Bairro de Entrega:</label>
+                          <select
+                            value={selectedNeighId}
+                            onChange={(e) => setSelectedNeighId(e.target.value)}
+                            style={{ backgroundColor: bgColor, color: textColor }}
+                            className="w-full border border-white/10 p-2.5 rounded-xl text-xs focus:outline-none font-bold">
+                            <option value="">-- Selecione seu Bairro --</option>
+                            {neighborhoods.map(n => (
+                              <option key={n.id} value={n.id}>{n.name} — R$ {Number(n.fee).toFixed(2)}</option>
+                            ))}
+                          </select>
+                        </div>
+                      )}
+                    </>
                   )}
-                </div>
-              </div>
-            </div>
-          )}
+                </>
+              )}
 
-          {/* PASSO 4: CONFIRMAÇÃO DE DADOS */}
-          {selectedTime && (
-            <form onSubmit={handleConfirmAppointment} className="space-y-3 pt-4 border-t border-black/10">
-              <h3 className="font-bold text-xs uppercase tracking-wider opacity-80">
-                {professionals.length > 1 ? '5. Seus Dados' : '4. Seus Dados'}
-              </h3>
-              
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                <input
-                  type="text"
-                  required
-                  placeholder="Seu Nome Completo"
-                  value={customerName}
-                  onChange={(e) => setCustomerName(e.target.value)}
-                  style={{ backgroundColor: cardColor, color: textColor }}
-                  className="w-full border border-black/10 p-3 rounded-xl text-xs focus:outline-none shadow-sm"
-                />
-                <input
-                  type="text"
-                  required
-                  placeholder="Seu WhatsApp (DDD + Número)"
-                  value={customerPhone}
-                  onChange={(e) => setCustomerPhone(maskPhone(e.target.value))}
-                  style={{ backgroundColor: cardColor, color: textColor }}
-                  className="w-full border border-black/10 p-3 rounded-xl text-xs focus:outline-none shadow-sm"
-                />
-                <input
-                  type="text"
-                  placeholder="Aniversário (Dia/Mês - Ex: 15/08)"
-                  value={customerBirthDate}
-                  onChange={(e) => setCustomerBirthDate(maskBirthDate(e.target.value))}
-                  style={{ backgroundColor: cardColor, color: textColor }}
-                  className="w-full border border-black/10 p-3 rounded-xl text-xs focus:outline-none shadow-sm"
-                />
+              <div>
+                <label className="text-[11px] opacity-70 block mb-1">Seu Nome:</label>
+                <input type="text" required value={customerName} onChange={(e) => setCustomerName(e.target.value)} style={{ backgroundColor: bgColor, color: textColor }} className="w-full border border-white/10 p-2.5 rounded-xl text-xs focus:outline-none" />
               </div>
 
-              <select
-                value={paymentMethod}
-                onChange={(e) => setPaymentMethod(e.target.value)}
-                style={{ backgroundColor: cardColor, color: textColor }}
-                className="w-full border border-black/10 p-3 rounded-xl text-xs focus:outline-none shadow-sm">
-                <option value="No Local">Pagar no Local (Dinheiro / Cartão / PIX)</option>
-                <option value="PIX Antecipado">PIX Antecipado</option>
-              </select>
+              <div>
+                <label className="text-[11px] opacity-70 block mb-1">Seu WhatsApp (Recebimento dos Links):</label>
+                <input type="text" required value={customerPhone} onChange={(e) => setCustomerPhone(e.target.value)} style={{ backgroundColor: bgColor, color: textColor }} className="w-full border border-white/10 p-2.5 rounded-xl text-xs focus:outline-none" />
+              </div>
 
-              <div style={{ backgroundColor: cardColor, color: textColor }} className="p-3.5 rounded-xl border border-black/10 flex justify-between items-center text-xs shadow-sm">
+              {!isAllDigital && deliveryType === 'ENTREGA' && (
                 <div>
-                  <span className="opacity-60 block text-[10px]">Duração: {formatDuration(totalDuration)}</span>
-                  <span className="font-bold text-sm">TOTAL: R$ {totalPrice.toFixed(2)}</span>
+                  <label className="text-[11px] opacity-70 block mb-1">Endereço Completo de Entrega:</label>
+                  <input type="text" required value={customerAddress} onChange={(e) => setCustomerAddress(e.target.value)} style={{ backgroundColor: bgColor, color: textColor }} className="w-full border border-white/10 p-2.5 rounded-xl text-xs focus:outline-none" placeholder="Rua, número, complemento, bairro, cidade/UF" />
                 </div>
-                <span className="font-bold text-sm" style={{ color: priceColor }}>{selectedDate.split('-').reverse().join('/')} às {selectedTime}</span>
+              )}
+
+              <div>
+                <label className="text-[11px] opacity-70 block mb-1">Forma de Pagamento Preferida:</label>
+                <select value={paymentMethod} onChange={(e) => setPaymentMethod(e.target.value)} style={{ backgroundColor: bgColor, color: textColor }} className="w-full border border-white/10 p-2.5 rounded-xl text-xs focus:outline-none">
+                  <option value="PIX">PIX</option>
+                  <option value="Cartão de Crédito">Cartão de Crédito</option>
+                  <option value="Cartão de Débito">Cartão de Débito</option>
+                  {!isAllDigital && <option value="Dinheiro">Dinheiro</option>}
+                </select>
+              </div>
+
+              <div style={{ backgroundColor: bgColor }} className="p-3 rounded-xl border border-white/10 space-y-1 text-xs">
+                <div className="flex justify-between"><span className="opacity-60">Subtotal:</span><span>R$ {subtotal.toFixed(2)}</span></div>
+                
+                {discountValue > 0 && (
+                  <div className="flex justify-between text-green-400 font-bold">
+                    <span>Desconto ({appliedCoupon?.code}):</span>
+                    <span>-R$ {discountValue.toFixed(2)}</span>
+                  </div>
+                )}
+
+                <div className="flex justify-between">
+                  <span className="opacity-60">Taxa de Frete/Envio:</span>
+                  <span>
+                    {isAllDigital 
+                      ? '⚡ Digital (Grátis)' 
+                      : (deliveryType === 'RETIRADA' ? 'Grátis' : (isFreeShipping ? '🎉 FRETE GRÁTIS' : `R$ ${activeShippingFee.toFixed(2)}`))}
+                  </span>
+                </div>
+
+                <div className="flex justify-between font-bold text-sm pt-1 border-t border-white/10">
+                  <span style={{ color: primaryColor }}>TOTAL:</span>
+                  <span style={{ color: primaryColor }}>R$ {total.toFixed(2)}</span>
+                </div>
               </div>
 
               <button
                 type="submit"
                 disabled={isSubmitting}
                 style={{ backgroundColor: primaryColor, color: btnTextColor }}
-                className="w-full font-bold py-3.5 rounded-xl text-xs shadow-lg transition hover:opacity-90 disabled:opacity-60">
-                {isSubmitting ? 'Agendando...' : 'Confirmar Agendamento no WhatsApp 🚀'}
+                className="w-full font-bold py-3.5 rounded-xl text-xs shadow-lg transition hover:opacity-90">
+                {isSubmitting ? 'Gerando Pagamento...' : 'Finalizar Pedido 🚀'}
               </button>
             </form>
-          )}
-        </div>
-      </div>
-
-      {/* RODAPÉ DO ESTABELECIMENTO */}
-      <footer className="mt-12 pt-6 border-t border-black/10 text-center space-y-2 px-4 pb-4 opacity-80">
-        <div className="flex justify-center items-center space-x-2">
-          {tenant.logo_url && (
-            <img src={tenant.logo_url} alt={tenant.name} className="w-5 h-5 rounded-full object-cover border border-black/10" />
-          )}
-          <span className="font-bold text-xs">{tenant.name}</span>
-        </div>
-
-        {formattedInstagramUrl && (
-          <a
-            href={formattedInstagramUrl}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="inline-flex items-center space-x-1 text-[11px] font-semibold opacity-90 hover:underline">
-            <span>📸 Acompanhe no Instagram</span>
-          </a>
-        )}
-
-        <p className="text-[10px] opacity-60">
-          © {new Date().getFullYear()} {tenant.name}. Todos os direitos reservados.
-        </p>
-        <p className="text-[9px] opacity-40">
-          Tecnologia por Sinerge MKT
-        </p>
-      </footer>
-
-      {/* TELA DE SUCESSO DO AGENDAMENTO */}
-      {bookingDone && (
-        <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 p-4">
-          <div style={{ backgroundColor: cardColor, color: textColor }} className="border border-black/10 w-full max-w-sm rounded-2xl p-6 space-y-4 shadow-2xl text-center">
-            <div className="text-4xl">✅</div>
-            <div>
-              <h3 className="font-bold text-base" style={{ color: priceColor }}>
-                {bookingDone.alreadyExisted ? 'Você já está agendada(o)!' : 'Agendamento confirmado!'}
-              </h3>
-              <p className="text-xs opacity-80 mt-1">
-                Código <b>#{bookingDone.id}</b>
-              </p>
-            </div>
-            <div style={{ backgroundColor: bgColor }} className="p-3 rounded-xl text-xs space-y-1 border border-black/10">
-              <p><b>📅 {bookingDone.date}</b> às <b>{bookingDone.time}</b></p>
-              {bookingDone.profName && <p>👤 {bookingDone.profName}</p>}
-            </div>
-            <p className="text-[11px] opacity-70">
-              Seu horário já está reservado. Não é preciso agendar de novo.
-            </p>
-            {bookingDone.waUrl && (
-              <a
-                href={bookingDone.waUrl}
-                style={{ backgroundColor: primaryColor, color: btnTextColor }}
-                className="block w-full font-bold py-3 rounded-xl text-xs shadow-lg">
-                💬 Enviar confirmação no WhatsApp
-              </a>
-            )}
-            <button
-              type="button"
-              onClick={handleNewBooking}
-              className="w-full py-2.5 rounded-xl text-xs font-bold border border-black/10 opacity-80">
-              Fazer outro agendamento
-            </button>
           </div>
         </div>
       )}
 
-      {/* MODAL MEUS AGENDAMENTOS */}
-      {showMyAppsModal && (
-        <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 p-4">
-          <div style={{ backgroundColor: cardColor, color: textColor }} className="border border-black/10 w-full max-w-sm sm:max-w-md rounded-2xl p-5 space-y-4 shadow-2xl">
-            <div className="flex justify-between items-center border-b border-black/10 pb-2">
-              <h3 className="font-bold text-sm" style={{ color: priceColor }}>📋 Meus Agendamentos</h3>
-              <button onClick={() => { setShowMyAppsModal(false); setEditingUserApp(null); }} className="opacity-60 font-bold text-xs">✕ Fechar</button>
+      {/* MODAL PIX DINÂMICO */}
+      {showPixModal && (
+        <div className="fixed inset-0 bg-black/90 flex items-center justify-center z-50 p-4">
+          <div style={{ backgroundColor: cardColor, color: textColor }} className="border border-green-500/40 w-full max-w-sm rounded-3xl p-6 space-y-4 shadow-2xl text-center relative overflow-hidden">
+            
+            <div className="space-y-1">
+              <span className="text-2xl block">⚡</span>
+              <h3 className="font-extrabold text-base text-green-400">Pagamento via PIX Dinâmico</h3>
+              <p className="text-[11px] opacity-70">Escaneie o QR Code ou copie a chave para pagar no app do seu banco.</p>
             </div>
 
-            {!editingUserApp ? (
-              <>
-                <form onSubmit={handleSearchMyAppointments} className="space-y-2">
-                  <label className="text-[11px] opacity-70 block">Digite seu WhatsApp para consultar:</label>
-                  <div className="flex space-x-2">
-                    <input
-                      type="text"
-                      placeholder="(DDD) 99999-9999"
-                      value={searchPhone}
-                      onChange={(e) => setSearchPhone(maskPhone(e.target.value))}
-                      style={{ backgroundColor: bgColor, color: textColor }}
-                      className="w-full border border-black/10 p-2.5 rounded-xl text-xs focus:outline-none"
-                    />
-                    <button type="submit" disabled={isSearchingApps} style={{ backgroundColor: primaryColor, color: btnTextColor }} className="px-3 py-2 rounded-xl text-xs font-bold whitespace-nowrap">
-                      {isSearchingApps ? '...' : 'Buscar'}
-                    </button>
-                  </div>
-                </form>
-
-                {/* VISUALIZAÇÃO DO CARTÃO FIDELIDADE DENTRO DO MODAL */}
-                {tenant.loyalty_enabled && searchPhone.replace(/\D/g, '').length >= 10 && (
-                  <div style={{ backgroundColor: bgColor }} className="p-3.5 rounded-xl border border-black/10 space-y-2">
-                    <div className="flex justify-between items-center">
-                      <span className="font-bold text-xs" style={{ color: priceColor }}>💳 Seu Cartão Fidelidade</span>
-                      <span className="font-bold text-xs">{loyaltyCount}/{targetLoyaltyVisits} Selos</span>
-                    </div>
-                    <p className="text-[10px] opacity-70">
-                      {isRewardReady 
-                        ? `🎉 Meta atingida! Prêmio disponível: ${tenant.loyalty_reward_text}` 
-                        : `Complete ${targetLoyaltyVisits} selos e ganhe: ${tenant.loyalty_reward_text}`}
-                    </p>
-                    <div className="grid grid-cols-5 gap-1.5 pt-1">
-                      {Array.from({ length: targetLoyaltyVisits }).map((_, index) => {
-                        const isStamped = index < loyaltyCount;
-                        return (
-                          <div
-                            key={index}
-                            style={{
-                              backgroundColor: isStamped ? primaryColor : cardColor,
-                              color: isStamped ? btnTextColor : textColor
-                            }}
-                            className={`h-7 rounded-lg flex items-center justify-center text-[10px] font-bold border border-black/10 ${
-                              isStamped ? 'shadow-sm scale-105' : 'opacity-50'
-                            }`}
-                          >
-                            {isStamped ? '✂️' : index + 1}
-                          </div>
-                        );
-                      })}
-                    </div>
-                  </div>
-                )}
-
-                <div className="space-y-2 max-h-72 overflow-y-auto">
-                  {myAppointments.length === 0 ? (
-                    <p className="text-xs opacity-50 text-center py-4">Nenhum agendamento encontrado.</p>
-                  ) : (
-                    myAppointments.map(app => {
-                      const canManage = app.status === 'agendado';
-
-                      return (
-                        <div key={app.id} style={{ backgroundColor: bgColor, color: textColor }} className="p-3 rounded-xl border border-black/10 text-xs space-y-2">
-                          <div className="flex justify-between font-bold">
-                            <span style={{ color: priceColor }}>📅 {app.appointment_date.split('-').reverse().join('/')} às {app.start_time}</span>
-                            <span className={`text-[10px] uppercase font-bold px-1.5 py-0.5 rounded ${
-                              app.status === 'agendado' ? 'bg-yellow-500/20 text-yellow-500' :
-                              app.status === 'concluido' ? 'bg-green-500/20 text-green-500' :
-                              'bg-red-500/20 text-red-500'
-                            }`}>
-                              {app.status}
-                            </span>
-                          </div>
-
-                          <p className="opacity-80"><b>Valor:</b> R$ {Number(app.total_price).toFixed(2)} ({app.payment_method})</p>
-
-                          {canManage && (
-                            <div className="flex space-x-2 pt-1 border-t border-black/10">
-                              <button
-                                onClick={() => handleOpenUserReschedule(app)}
-                                className="flex-1 bg-purple-600/20 hover:bg-purple-600/30 text-purple-600 py-1.5 rounded-lg font-bold text-[10px] border border-purple-500/30">
-                                ✏️ Reagendar
-                              </button>
-                              <button
-                                onClick={() => handleUserCancelApp(app)}
-                                className="flex-1 bg-red-500/20 hover:bg-red-500/30 text-red-600 py-1.5 rounded-lg font-bold text-[10px] border border-red-500/30">
-                                ❌ Cancelar
-                              </button>
-                            </div>
-                          )}
-                        </div>
-                      );
-                    })
-                  )}
-                </div>
-              </>
+            {pixStatus === 'approved' ? (
+              <div className="bg-green-500/20 border border-green-500/50 p-3 rounded-2xl space-y-1 animate-bounce">
+                <span className="text-xl">✅</span>
+                <p className="font-extrabold text-xs text-green-400">PAGAMENTO CONFIRMADO COM SUCESSO!</p>
+                <p className="text-[10px] text-gray-300">Seu pedido já foi baixado automaticamente no sistema.</p>
+              </div>
             ) : (
-              /* FORMULÁRIO DE REAGENDAMENTO */
-              <form onSubmit={handleSaveUserReschedule} className="space-y-3">
-                <div className="bg-purple-500/10 border border-purple-500/30 p-2.5 rounded-xl text-xs">
-                  <span className="text-purple-600 font-bold block">Reagendando Atendimento #{editingUserApp.id}</span>
-                  <span className="opacity-60 text-[10px]">Data Atual: {editingUserApp.appointment_date.split('-').reverse().join('/')} às {editingUserApp.start_time}</span>
-                </div>
-
-                <div>
-                  <label className="text-[11px] opacity-70 block mb-1">Nova Data:</label>
-                  <input
-                    type="date"
-                    min={getTodayLocal()}
-                    value={userNewDate}
-                    onChange={(e) => {
-                      setUserNewDate(e.target.value);
-                      setUserNewTime('');
-                    }}
-                    style={{ backgroundColor: bgColor, color: textColor }}
-                    className="w-full border border-black/10 p-2.5 rounded-xl text-xs focus:outline-none cursor-pointer"
-                  />
-                </div>
-
-                <div>
-                  <label className="text-[11px] opacity-70 block mb-1">Escolha o Novo Horário Livre:</label>
-                  {rescheduleSlotData.slots.length === 0 ? (
-                    <p className="text-[11px] text-red-500 bg-red-500/10 p-2 rounded-lg text-center font-semibold">
-                      Sem horários vagos nesta data.
-                    </p>
-                  ) : (
-                    <div className="grid grid-cols-3 gap-2 max-h-36 overflow-y-auto pt-1">
-                      {rescheduleSlotData.slots.map(slot => (
-                        <button
-                          type="button"
-                          key={slot}
-                          onClick={() => setUserNewTime(slot)}
-                          style={{
-                            backgroundColor: userNewTime === slot ? primaryColor : bgColor,
-                            color: userNewTime === slot ? btnTextColor : textColor
-                          }}
-                          className="py-1.5 rounded-lg border border-black/10 text-xs font-bold text-center transition">
-                          {slot}
-                        </button>
-                      ))}
-                    </div>
-                  )}
-                </div>
-
-                <div className="flex space-x-2 pt-2">
-                  <button
-                    type="button"
-                    onClick={() => setEditingUserApp(null)}
-                    className="w-1/2 bg-gray-300 text-gray-800 py-2.5 rounded-xl text-xs font-bold">
-                    Voltar
-                  </button>
-                  <button
-                    type="submit"
-                    disabled={isSavingUserReschedule || !userNewTime}
-                    style={{ backgroundColor: primaryColor, color: btnTextColor }}
-                    className="w-1/2 py-2.5 rounded-xl text-xs font-bold transition disabled:opacity-50">
-                    {isSavingUserReschedule ? 'Salvando...' : 'Confirmar'}
-                  </button>
-                </div>
-              </form>
+              <div className="bg-yellow-500/10 border border-yellow-500/30 p-2.5 rounded-2xl flex items-center justify-center space-x-2">
+                <span className="w-2.5 h-2.5 rounded-full bg-yellow-400 animate-ping"></span>
+                <span className="text-xs font-bold text-yellow-400">Aguardando pagamento no banco...</span>
+              </div>
             )}
+
+            {pixQrCodeBase64 && (
+              <div className="bg-white p-3 rounded-2xl inline-block shadow-lg mx-auto border border-gray-200">
+                <img 
+                  src={`data:image/jpeg;base64,${pixQrCodeBase64}`} 
+                  alt="QR Code PIX Mercado Pago" 
+                  className="w-44 h-44 object-contain mx-auto" 
+                />
+              </div>
+            )}
+
+            <div className="space-y-2">
+              <span className="text-xs text-gray-400 block font-bold">Valor Total: <b className="text-green-400 text-sm">R$ {total.toFixed(2)}</b></span>
+              
+              <button
+                type="button"
+                onClick={copyPixCode}
+                className={`w-full font-bold py-3 rounded-xl text-xs border transition flex items-center justify-center space-x-2 ${
+                  pixCopySuccess ? 'bg-green-600 text-white border-green-500' : 'bg-gray-800 text-white border-gray-700 hover:bg-gray-700'
+                }`}>
+                <span>{pixCopySuccess ? '✓ Chave Copiada!' : '📋 Copiar Chave PIX (Copia e Cola)'}</span>
+              </button>
+            </div>
+
+            <div className="pt-2 border-t border-white/10 space-y-2">
+              <button
+                type="button"
+                onClick={() => {
+                  sendWhatsAppNotification({ id: currentOrderId }, pixStatus === 'approved');
+                  setShowPixModal(false);
+                  setCart([]);
+                  setShowCartModal(false);
+                  if (currentOrderId) {
+                    router.push(`/${slug}/pedido/${currentOrderId}`);
+                  }
+                }}
+                className="w-full bg-green-500 hover:bg-green-600 text-white font-extrabold py-3.5 rounded-xl text-xs transition shadow-lg flex items-center justify-center space-x-2">
+                <span>💬 Enviar Confirmação no WhatsApp</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  setShowPixModal(false);
+                  setCart([]);
+                  setShowCartModal(false);
+                  if (currentOrderId) {
+                    router.push(`/${slug}/pedido/${currentOrderId}`);
+                  }
+                }}
+                className="text-[11px] opacity-60 hover:opacity-100 font-bold block mx-auto pt-1">
+                Acompanhar Pedido
+              </button>
+            </div>
           </div>
         </div>
       )}
