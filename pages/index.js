@@ -1,8 +1,31 @@
 import React, { useState, useEffect } from 'react';
 import { useRouter } from 'next/router';
+import Head from 'next/head';
 import { supabase } from '../lib/supabase';
+import { apiLogin, saveToken, clearToken } from '../lib/clientAuth';
 
-export default function HomePortalEcommerce() {
+// Busca os dados da loja pelo servidor (sem senhas/tokens)
+const fetchPublicTenant = async (slug) => {
+  try {
+    const r = await fetch(`/api/public-tenant?slug=${encodeURIComponent(slug)}`);
+    const j = await r.json();
+    return j.tenant || null;
+  } catch (e) {
+    return null;
+  }
+};
+
+// Remove senhas que versões antigas guardavam no aparelho
+const stripSecrets = (t) => {
+  if (!t) return t;
+  const clean = { ...t };
+  Object.keys(clean).forEach(k => {
+    if (/(password|senha|token|secret|api_key|pin)$/i.test(k) || k === 'instance_id' || k === 'bot_whatsapp_instance') delete clean[k];
+  });
+  return clean;
+};
+
+export default function HomePortalAgendamento() {
   const router = useRouter();
 
   const [slugInput, setSlugInput] = useState('');
@@ -14,66 +37,65 @@ export default function HomePortalEcommerce() {
   // ESTADOS DO PIX, MODAL E MÉTRICAS
   const [showPixModal, setShowPixModal] = useState(false);
   const [copiedPix, setCopiedPix] = useState(false);
-  const [stats, setStats] = useState({ ordersCount: 0, totalRevenue: 0 });
+  const [stats, setStats] = useState({ appointmentsCount: 0, totalRevenue: 0 });
 
-  // CONFIGURAÇÕES DE DOMÍNIO, PIX OFICIAL (ESTÁTICO) E WHATSAPP SUPORTE
-  const DOMAIN_URL = 'https://loja.sinergemkt.com';
+  // DOMÍNIO OFICIAL, PIX ESTÁTICO E WHATSAPP SUPORTE
+  const DOMAIN_URL = 'https://agendamento.sinergemkt.com';
   const PIX_COPIA_COLA = "00020101021126330014br.gov.bcb.pix011107758777945520400005303986540599.995802BR5925HENRIQUE GONCALVES DE OLI6009SAO PAULO622905251M24TWWDEN5A3XEVQZMREE1D56304C896";
   const SUPPORT_WHATSAPP = "5547996302864";
 
-  // MURAL DE NOVIDADES DO SAAS DE E-COMMERCE / CATÁLOGO
+  // MURAL DE NOVIDADES DO SAAS DE AGENDAMENTO (ATUALIZADO)
   const systemUpdates = [
-    { id: 1, tag: 'NOVO', date: '10/09', title: '👕 Rastreio Automático de Encomendas', desc: 'Notificação automática no WhatsApp do cliente ao atualizar o código de rastreio.' },
-    { id: 2, tag: 'MELHORIA', date: '05/09', title: '🎨 Grade de Tamanhos & Variantes', desc: 'Seleção facilitada de cores, tamanhos (P, M, G, GG) e variações direto no catálogo.' }
+    { id: 1, tag: 'NOVO', date: '23/09', title: '💳 Cartão Fidelidade 100% Automático', desc: 'Acúmulo automático de selos ao concluir atendimentos na agenda e sincronização instantânea com o cadastro do cliente.' },
+    { id: 2, tag: 'NOVO', date: '22/09', title: '🎨 Tema Amarelo ☀️ / Dourado', desc: 'Novo preset de cores na agenda com contraste moderno e paleta harmônica.' },
+    { id: 3, tag: 'NOVO', date: '20/09', title: '🔐 Extrato Financeiro Protegido por PIN', desc: 'Relatório individual de comissões e faturamento por profissional com senha de segurança.' },
+    { id: 4, tag: 'MELHORIA', date: '15/09', title: '🤖 Lembretes de Amanhã no WhatsApp', desc: 'Painel rápido na agenda para envio de confirmação no WhatsApp 1 dia antes para evitar faltas.' }
   ];
 
   // CARREGA E RE-ATUALIZA OS DADOS DIRETO DO SUPABASE
   useEffect(() => {
-    const savedTenant = localStorage.getItem('sinerge_authenticated_ecommerce_tenant');
-    if (savedTenant) {
+    const savedTenantStr = localStorage.getItem('sinerge_authenticated_tenant');
+    if (savedTenantStr) {
       try {
-        const parsed = JSON.parse(savedTenant);
-        setTenant(parsed);
-
-        if (parsed && parsed.id) {
-          // Re-busca a versão mais recente do Master no banco
-          supabase
-            .from('tenants')
-            .select('*')
-            .eq('id', parsed.id)
-            .single()
-            .then(({ data }) => {
-              if (data) {
-                setTenant(data);
-                localStorage.setItem('sinerge_authenticated_ecommerce_tenant', JSON.stringify(data));
-                fetchTenantStats(data.id);
-              }
-            });
+        const saved = stripSecrets(JSON.parse(savedTenantStr));
+        setTenant(saved);
+        localStorage.setItem('sinerge_authenticated_tenant', JSON.stringify(saved));
+        
+        if (saved && saved.slug) {
+          // Busca dados mais recentes da loja e estatísticas de agendamentos no banco
+          fetchPublicTenant(saved.slug).then((data) => {
+            if (data) {
+              setTenant(data);
+              localStorage.setItem('sinerge_authenticated_tenant', JSON.stringify(data));
+              fetchTenantStats(data.id);
+            }
+          });
         }
       } catch (e) {
-        localStorage.removeItem('sinerge_authenticated_ecommerce_tenant');
+        localStorage.removeItem('sinerge_authenticated_tenant');
       }
     }
   }, []);
 
-  // BUSCA ESTATÍSTICAS DE ENCOMENDAS / VENDAS DA LOJA
+  // BUSCA ESTATÍSTICAS DA AGENDA DO ESTABELECIMENTO
   const fetchTenantStats = async (tenantId) => {
     try {
-      const { data: orders } = await supabase
-        .from('orders')
-        .select('total, status, payment_method')
-        .eq('tenant_id', tenantId);
+      const { data: appointments } = await supabase
+        .from('appointments')
+        .select('total_price, status')
+        .eq('tenant_id', tenantId)
+        .neq('status', 'cancelado');
 
-      if (orders) {
-        const count = orders.length;
-        const revenue = orders.reduce((acc, order) => {
-          const isPaid = order.payment_method?.includes('PAGO') || order.status === 'concluido' || order.status === 'entregue' || order.status === 'enviado';
-          return isPaid ? acc + Number(order.total || 0) : acc;
+      if (appointments) {
+        const count = appointments.length;
+        const revenue = appointments.reduce((acc, app) => {
+          const val = Number(app.total_price || 0);
+          return acc + val;
         }, 0);
-        setStats({ ordersCount: count, totalRevenue: revenue });
+        setStats({ appointmentsCount: count, totalRevenue: revenue });
       }
     } catch (err) {
-      console.log('Erro ao carregar métricas do e-commerce:', err);
+      console.log('Erro ao carregar estatísticas da agenda:', err);
     }
   };
 
@@ -84,26 +106,28 @@ export default function HomePortalEcommerce() {
     setLoading(true);
     const cleanSlug = slugInput.toLowerCase().trim();
 
-    const { data, error } = await supabase
-      .from('tenants')
-      .select('*')
-      .eq('slug', cleanSlug)
-      .eq('admin_password', passwordInput)
-      .maybeSingle();
+    // Senha conferida no servidor
+    const res = await apiLogin(cleanSlug, 'admin', passwordInput);
+    const data = res.ok ? await fetchPublicTenant(cleanSlug) : null;
 
     setLoading(false);
 
-    if (error || !data) {
-      alert("Identificador da loja ou Senha de Administrador incorretos!");
+    if (!res.ok || !data) {
+      alert(res.error && !['Senha incorreta', 'Estabelecimento não encontrado'].includes(res.error)
+        ? res.error
+        : "Identificador da loja ou Senha de Administrador incorretos!");
     } else {
+      // Já deixa o painel admin e a agenda liberados neste aparelho
+      if (res.token) saveToken(cleanSlug, res.token);
       setTenant(data);
-      localStorage.setItem('sinerge_authenticated_ecommerce_tenant', JSON.stringify(data));
+      localStorage.setItem('sinerge_authenticated_tenant', JSON.stringify(data));
       fetchTenantStats(data.id);
     }
   };
 
   const handleLogout = () => {
-    localStorage.removeItem('sinerge_authenticated_ecommerce_tenant');
+    if (tenant?.slug) clearToken(tenant.slug);
+    localStorage.removeItem('sinerge_authenticated_tenant');
     setTenant(null);
     setSlugInput('');
     setPasswordInput('');
@@ -124,7 +148,7 @@ export default function HomePortalEcommerce() {
     setTimeout(() => setCopiedPix(false), 2500);
   };
 
-  // 🟢 FORMATADOR DE MOEDA BRASILEIRA (CORRIGIDO PARA PRESERVAR R$ 0,00)
+  // FORMATADOR DE MOEDA BRASILEIRA (CORRIGIDO PARA PRESERVAR R$ 0,00)
   const formatCurrency = (amount, fallback = 0) => {
     const val = Number(amount ?? fallback);
     return val.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
@@ -147,18 +171,18 @@ export default function HomePortalEcommerce() {
     }
   };
 
-  // 🎨 CORES E TEMAS DINÂMICOS DO CLIENTE
-  const primaryColor = tenant?.primary_color || '#FF8C00';
+  // CORES E TEMAS DINÂMICOS DO CLIENTE
+  const primaryColor = tenant?.primary_color || '#A855F7';
   const buttonTextColor = tenant?.button_text_color || '#FFFFFF';
   const secondaryColor = tenant?.secondary_color || '#090D16';
   const cardBgColor = tenant?.card_bg_color || '#111827';
   const textColor = tenant?.text_color || '#FFFFFF';
 
-  // TRATAMENTO DA LOGO
-  const isBurgerLogo = tenant?.logo_url && tenant.logo_url.includes('photo-1550547660');
-  const logoUrl = (tenant?.logo_url && !isBurgerLogo && tenant.logo_url.trim() !== '')
+  // LOGO
+  const isFoodLogo = tenant?.logo_url && (tenant.logo_url.includes('photo-1550547660') || tenant.logo_url.includes('photo-1555396273'));
+  const logoUrl = (tenant?.logo_url && !isFoodLogo && tenant.logo_url.trim() !== '')
     ? tenant.logo_url
-    : 'https://images.unsplash.com/photo-1521572267360-ee0c2909d518?w=150&auto=format&fit=crop&q=80';
+    : 'https://images.unsplash.com/photo-1585747860715-2ba37e788b70?w=150&auto=format&fit=crop&q=80';
 
   const dueInfo = tenant ? getDueDateInfo(tenant.due_date) : null;
   const qrCodeImageUrl = `https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(PIX_COPIA_COLA)}`;
@@ -168,17 +192,25 @@ export default function HomePortalEcommerce() {
       className="min-h-screen font-sans flex flex-col justify-between p-4 md:p-8 transition-colors duration-300"
       style={{ backgroundColor: tenant ? secondaryColor : '#090D16', color: tenant ? textColor : '#FFFFFF' }}>
       
+      <Head>
+        <title>Sinerge Agendamento - Gestão</title>
+        <link rel="manifest" href="/manifest.json" />
+        <meta name="theme-color" content="#FF8C00" />
+        <meta name="apple-mobile-web-app-title" content="Sinerge Gestão" />
+        <link rel="apple-touch-icon" href="/icon-192.png" />
+      </Head>
+
       {/* CABEÇALHO */}
       <header className="max-w-5xl mx-auto w-full flex justify-between items-center py-4 border-b" style={{ borderColor: 'rgba(255,255,255,0.1)' }}>
         <div className="flex items-center space-x-3">
           <div 
             className="w-9 h-9 rounded-xl flex items-center justify-center font-bold text-lg shadow-lg"
-            style={{ backgroundColor: tenant ? primaryColor : '#FF8C00', color: tenant ? buttonTextColor : '#FFFFFF' }}>
-            👕
+            style={{ backgroundColor: tenant ? primaryColor : '#A855F7', color: tenant ? buttonTextColor : '#FFFFFF' }}>
+            ✂️
           </div>
           <div>
-            <h1 className="font-bold text-base leading-tight" style={{ color: tenant ? textColor : '#FFFFFF' }}>Sinerge Catálogo</h1>
-            <p className="text-[11px] opacity-75">Portal de Vestuário & E-Commerce SaaS</p>
+            <h1 className="font-bold text-base leading-tight" style={{ color: tenant ? textColor : '#FFFFFF' }}>Sinerge Agendamento</h1>
+            <p className="text-[11px] opacity-75">Portal do Cliente & Gestão SaaS</p>
           </div>
         </div>
 
@@ -197,26 +229,26 @@ export default function HomePortalEcommerce() {
         {!tenant ? (
           /* TELA DE LOGIN */
           <div className="max-w-md mx-auto bg-gray-900 border border-gray-800 rounded-3xl p-6 md:p-8 space-y-6 shadow-2xl relative overflow-hidden">
-            <div className="absolute top-0 left-0 right-0 h-1.5 bg-gradient-to-r from-orange-500 via-purple-500 to-orange-500"></div>
+            <div className="absolute top-0 left-0 right-0 h-1.5 bg-gradient-to-r from-purple-500 via-pink-500 to-purple-500"></div>
 
             <div className="text-center space-y-2 pt-2">
-              <div className="w-12 h-12 bg-orange-500/10 border border-orange-500/30 text-orange-400 rounded-2xl flex items-center justify-center text-xl mx-auto">
+              <div className="w-12 h-12 bg-purple-500/10 border border-purple-500/30 text-purple-400 rounded-2xl flex items-center justify-center text-xl mx-auto">
                 🔐
               </div>
-              <h2 className="text-xl font-bold text-white">Acessar Minha Loja</h2>
+              <h2 className="text-xl font-bold text-white">Acessar Meu Painel</h2>
               <p className="text-xs text-gray-400">Digite seu identificador e senha de administrador para entrar.</p>
             </div>
 
             <form onSubmit={handleLogin} className="space-y-4 text-xs">
               <div>
-                <label className="text-gray-300 font-bold block mb-1">Identificador da Loja (Slug):</label>
+                <label className="text-gray-300 font-bold block mb-1">Identificador do Estabelecimento (Slug):</label>
                 <input
                   type="text"
                   required
-                  placeholder="Ex: vistatuafe"
+                  placeholder="Ex: lannadesigner"
                   value={slugInput}
                   onChange={(e) => setSlugInput(e.target.value)}
-                  className="w-full bg-gray-950 border border-gray-800 p-3.5 rounded-xl text-white focus:outline-none focus:border-orange-500 transition text-sm"
+                  className="w-full bg-gray-950 border border-gray-800 p-3.5 rounded-xl text-white focus:outline-none focus:border-purple-500 transition text-sm"
                 />
               </div>
 
@@ -228,15 +260,15 @@ export default function HomePortalEcommerce() {
                   placeholder="••••••••"
                   value={passwordInput}
                   onChange={(e) => setPasswordInput(e.target.value)}
-                  className="w-full bg-gray-950 border border-gray-800 p-3.5 rounded-xl text-white focus:outline-none focus:border-orange-500 transition text-sm"
+                  className="w-full bg-gray-950 border border-gray-800 p-3.5 rounded-xl text-white focus:outline-none focus:border-purple-500 transition text-sm"
                 />
               </div>
 
               <button
                 type="submit"
                 disabled={loading}
-                className="w-full bg-orange-500 hover:bg-orange-600 text-white font-bold py-4 rounded-xl text-xs transition shadow-lg shadow-orange-500/20">
-                {loading ? 'Acessando Sistema...' : 'Entrar na Minha Loja 🚀'}
+                className="w-full bg-purple-600 hover:bg-purple-700 text-white font-bold py-4 rounded-xl text-xs transition shadow-lg shadow-purple-600/20">
+                {loading ? 'Acessando Sistema...' : 'Entrar na Minha Plataforma 🚀'}
               </button>
             </form>
           </div>
@@ -244,7 +276,7 @@ export default function HomePortalEcommerce() {
           /* PAINEL AUTENTICADO DO CLIENTE */
           <div className="space-y-6">
             
-            {/* HERO BANNER & MÉTRICAS DA LOJA */}
+            {/* HERO BANNER & MÉTRICAS DA AGENDA */}
             <div 
               className="border rounded-3xl p-6 space-y-4 relative overflow-hidden shadow-xl"
               style={{ backgroundColor: cardBgColor, borderColor: 'rgba(255,255,255,0.1)' }}>
@@ -264,7 +296,7 @@ export default function HomePortalEcommerce() {
                         🟢 Autenticado
                       </span>
                     </div>
-                    <p className="text-xs opacity-75 mt-0.5">Painel de controle de catálogo e pedidos de confecção.</p>
+                    <p className="text-xs opacity-75 mt-0.5">Painel de controle do seu sistema de agendamentos.</p>
                   </div>
                 </div>
 
@@ -273,36 +305,38 @@ export default function HomePortalEcommerce() {
                     onClick={() => router.push(`/${tenant.slug}/admin`)}
                     style={{ backgroundColor: primaryColor, color: buttonTextColor }}
                     className="font-bold px-5 py-3 rounded-xl text-xs transition shadow-lg w-full md:w-auto text-center hover:opacity-90">
-                    ⚙️ Gestão de Catálogo
+                    ⚙️ Ir para Configurações
                   </button>
                 </div>
               </div>
 
-              {/* MÉTRICAS RÁPIDAS DE VENDAS */}
+              {/* MÉTRICAS RÁPIDAS DE ATENDIMENTOS */}
               <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 pt-3 border-t text-xs" style={{ borderColor: 'rgba(255,255,255,0.08)' }}>
                 <div className="p-3 rounded-2xl border" style={{ backgroundColor: secondaryColor, borderColor: 'rgba(255,255,255,0.05)' }}>
-                  <span className="opacity-60 block text-[10px]">Vendas Registradas:</span>
+                  <span className="opacity-60 block text-[10px]">Atendimentos Confirmados:</span>
+                  <span className="text-base font-bold" style={{ color: textColor }}>{stats.appointmentsCount} agendamento(s)</span>
+                </div>
+
+                <div className="p-3 rounded-2xl border" style={{ backgroundColor: secondaryColor, borderColor: 'rgba(255,255,255,0.05)' }}>
+                  <span className="opacity-60 block text-[10px]">Movimentação Prevista:</span>
                   <span className="text-base font-bold text-green-400">
                     {formatCurrency(stats.totalRevenue, 0)}
                   </span>
                 </div>
 
-                <div className="p-3 rounded-2xl border" style={{ backgroundColor: secondaryColor, borderColor: 'rgba(255,255,255,0.05)' }}>
-                  <span className="opacity-60 block text-[10px]">Total de Encomendas:</span>
-                  <span className="text-base font-bold" style={{ color: textColor }}>{stats.ordersCount} pedido(s)</span>
-                </div>
-
                 <div className="p-3 rounded-2xl border col-span-2 sm:col-span-1 flex justify-between items-center" style={{ backgroundColor: secondaryColor, borderColor: 'rgba(255,255,255,0.05)' }}>
                   <div>
                     <span className="opacity-60 block text-[10px]">Robô de WhatsApp:</span>
-                    <span className="text-xs font-bold text-green-400">🟢 Ativo</span>
+                    {tenant.bot_enabled
+                      ? <span className="text-xs font-bold text-green-400">🟢 Ativado</span>
+                      : <span className="text-xs font-bold opacity-60">⚪ Desligado</span>}
                   </div>
                   <button onClick={() => router.push(`/${tenant.slug}/admin`)} className="text-[10px] font-bold underline" style={{ color: primaryColor }}>Configurar</button>
                 </div>
               </div>
             </div>
 
-            {/* 💳 BARRA DE VENCIMENTO E MENSALIDADE PIX */}
+            {/* BARRA DE VENCIMENTO E MENSALIDADE PIX */}
             <div 
               className={`p-5 rounded-3xl border flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 transition ${
                 dueInfo.isExpired 
@@ -330,14 +364,14 @@ export default function HomePortalEcommerce() {
               </button>
             </div>
 
-            {/* 📢 MURAL DE NOVIDADES DO SISTEMA */}
+            {/* MURAL DE NOVIDADES DO SISTEMA */}
             <div 
               className="p-5 rounded-3xl border space-y-3"
               style={{ backgroundColor: cardBgColor, borderColor: 'rgba(255,255,255,0.1)' }}>
               
               <div className="flex justify-between items-center">
                 <h3 className="font-bold text-xs uppercase tracking-wider flex items-center space-x-2" style={{ color: primaryColor }}>
-                  <span>📢 O que há de novo no Sinerge Catálogo?</span>
+                  <span>📢 O que há de novo no Sinerge Agendamento?</span>
                 </h3>
                 <span className="text-[10px] bg-purple-500/20 text-purple-300 border border-purple-500/30 px-2 py-0.5 rounded-full font-bold">Atualizado</span>
               </div>
@@ -346,7 +380,7 @@ export default function HomePortalEcommerce() {
                 {systemUpdates.map(up => (
                   <div key={up.id} className="p-3.5 rounded-2xl border space-y-1" style={{ backgroundColor: secondaryColor, borderColor: 'rgba(255,255,255,0.05)' }}>
                     <div className="flex items-center space-x-2">
-                      <span className="bg-orange-500/20 text-orange-400 text-[9px] font-bold px-2 py-0.5 rounded">{up.tag}</span>
+                      <span className="bg-purple-500/20 text-purple-300 text-[9px] font-bold px-2 py-0.5 rounded">{up.tag}</span>
                       <span className="text-[10px] opacity-60">{up.date}</span>
                       <h4 className="font-bold text-xs truncate" style={{ color: textColor }}>{up.title}</h4>
                     </div>
@@ -356,7 +390,7 @@ export default function HomePortalEcommerce() {
               </div>
             </div>
 
-            {/* ATALHOS DE NAVEGAÇÃO */}
+            {/* ATALHOS DE MÓDULOS DE TRABALHO */}
             <div>
               <h3 className="text-xs font-bold uppercase tracking-wider mb-3 opacity-75">
                 📌 O que você deseja acessar agora?
@@ -364,7 +398,7 @@ export default function HomePortalEcommerce() {
 
               <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                 
-                {/* ADMIN */}
+                {/* PAINEL ADMIN */}
                 <div
                   onClick={() => router.push(`/${tenant.slug}/admin`)}
                   style={{ backgroundColor: cardBgColor, borderColor: 'rgba(255,255,255,0.1)' }}
@@ -376,57 +410,57 @@ export default function HomePortalEcommerce() {
                   </div>
                   <div>
                     <h4 className="font-bold text-sm transition" style={{ color: textColor }}>Painel Administrativo</h4>
-                    <p className="text-xs opacity-70 mt-1">Gerencie catálogo de camisas, peças, preços e categorias.</p>
+                    <p className="text-xs opacity-70 mt-1">Gerencie serviços, preços, equipe, comissões e regras.</p>
                   </div>
                   <span className="text-xs font-bold block pt-2" style={{ color: primaryColor }}>Acessar Admin ➔</span>
                 </div>
 
-                {/* PRODUÇÃO */}
+                {/* GESTÃO DA AGENDA */}
                 <div
-                  onClick={() => router.push(`/${tenant.slug}/producao`)}
+                  onClick={() => router.push(`/${tenant.slug}/agenda`)}
                   style={{ backgroundColor: cardBgColor, borderColor: 'rgba(255,255,255,0.1)' }}
                   className="border hover:border-opacity-50 p-5 rounded-3xl space-y-3 cursor-pointer transition group shadow-lg">
                   <div 
-                    className="w-10 h-10 rounded-2xl flex items-center justify-center text-lg border text-blue-400"
+                    className="w-10 h-10 rounded-2xl flex items-center justify-center text-lg border text-purple-400"
                     style={{ backgroundColor: secondaryColor, borderColor: 'rgba(255,255,255,0.1)' }}>
-                    👕
+                    📅
                   </div>
                   <div>
-                    <h4 className="font-bold text-sm transition" style={{ color: textColor }}>Fila de Produção</h4>
-                    <p className="text-xs opacity-70 mt-1">Acompanhe encomendas recebidas, etapa de estamparia e envio nos Correios.</p>
+                    <h4 className="font-bold text-sm transition" style={{ color: textColor }}>Gestão da Agenda</h4>
+                    <p className="text-xs opacity-70 mt-1">Acompanhe horários agendados, feche folgas e conclua atendimentos.</p>
                   </div>
-                  <span className="text-xs font-bold text-blue-400 block pt-2">Abrir Produção ➔</span>
+                  <span className="text-xs font-bold text-purple-400 block pt-2">Abrir Agenda ➔</span>
                 </div>
 
-                {/* CATÁLOGO PÚBLICO */}
+                {/* PÁGINA PÚBLICA */}
                 <div
                   onClick={() => window.open(publicUrl, '_blank')}
                   style={{ backgroundColor: cardBgColor, borderColor: 'rgba(255,255,255,0.1)' }}
                   className="border hover:border-opacity-50 p-5 rounded-3xl space-y-3 cursor-pointer transition group shadow-lg">
                   <div 
-                    className="w-10 h-10 rounded-2xl flex items-center justify-center text-lg border text-emerald-400"
+                    className="w-10 h-10 rounded-2xl flex items-center justify-center text-lg border text-blue-400"
                     style={{ backgroundColor: secondaryColor, borderColor: 'rgba(255,255,255,0.1)' }}>
                     🛍️
                   </div>
                   <div>
-                    <h4 className="font-bold text-sm transition" style={{ color: textColor }}>Catálogo Público</h4>
-                    <p className="text-xs opacity-70 mt-1">Veja a tela onde seus clientes escolhem tamanhos, cores e encomendam.</p>
+                    <h4 className="font-bold text-sm transition" style={{ color: textColor }}>Página do Cliente</h4>
+                    <p className="text-xs opacity-70 mt-1">Veja a tela pública que seus clientes usam para agendar.</p>
                   </div>
-                  <span className="text-xs font-bold text-emerald-400 block pt-2">Visualizar Catálogo ➔</span>
+                  <span className="text-xs font-bold text-blue-400 block pt-2">Visualizar Página ➔</span>
                 </div>
 
               </div>
             </div>
 
-            {/* SEÇÃO DO LINK */}
+            {/* BLOCO DE COMPARTILHAMENTO DO LINK */}
             <div 
               className="border rounded-3xl p-6 space-y-3 shadow-xl"
               style={{ backgroundColor: cardBgColor, borderColor: 'rgba(255,255,255,0.1)' }}>
               <div>
                 <h4 className="font-bold text-sm flex items-center space-x-1" style={{ color: textColor }}>
-                  <span>🔗 Link da Sua Loja / Catálogo Digital</span>
+                  <span>🔗 Link de Agendamento do Seu Estabelecimento</span>
                 </h4>
-                <p className="text-xs opacity-70">Divulgue no Instagram ou envie direto aos clientes.</p>
+                <p className="text-xs opacity-70">Divulgue no Instagram ou envie direto para seus clientes.</p>
               </div>
 
               <div className="flex flex-col sm:flex-row items-center gap-2 pt-1">
@@ -449,7 +483,7 @@ export default function HomePortalEcommerce() {
                   </button>
 
                   <a
-                    href={`https://wa.me/?text=${encodeURIComponent(`Confira nosso catálogo de peças personalizadas: ${publicUrl}`)}`}
+                    href={`https://wa.me/?text=${encodeURIComponent(`Acesse nosso link para agendar seu horário: ${publicUrl}`)}`}
                     target="_blank"
                     rel="noopener noreferrer"
                     className="bg-green-600/20 hover:bg-green-600/30 text-green-400 border border-green-500/30 px-4 py-3 rounded-xl text-xs font-bold transition whitespace-nowrap text-center">
@@ -510,7 +544,7 @@ export default function HomePortalEcommerce() {
 
             <a 
               href={`https://wa.me/${SUPPORT_WHATSAPP}?text=${encodeURIComponent(
-                `Olá! Realizei o pagamento da mensalidade da loja *${tenant.name}* (${formatCurrency(tenant.monthly_fee, 99.99)}). Segue o comprovante em anexo!`
+                `Olá! Realizei o pagamento da mensalidade do sistema de agendamento *${tenant.name}* (${formatCurrency(tenant.monthly_fee, 99.99)}). Segue o comprovante em anexo!`
               )}`} 
               target="_blank" 
               rel="noopener noreferrer"
@@ -523,7 +557,7 @@ export default function HomePortalEcommerce() {
 
       {/* RODAPÉ */}
       <footer className="max-w-5xl mx-auto w-full text-center py-4 border-t text-xs opacity-60" style={{ borderColor: 'rgba(255,255,255,0.1)' }}>
-        <p>© 2026 Sinerge Catálogo — Plataforma SaaS Multi-Tenant.</p>
+        <p>© 2026 Sinerge Agendamento — Plataforma SaaS Multi-Tenant.</p>
       </footer>
     </div>
   );

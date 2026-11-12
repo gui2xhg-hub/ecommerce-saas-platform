@@ -1,21 +1,20 @@
 import { Html, Head, Main, NextScript } from 'next/document';
 
+// IMPORTANTE: o <link rel="manifest"> NÃO fica mais aqui.
+// Cada página define o seu, para que cada app instalado abra no lugar certo:
+//   /            e /{slug}/admin -> /manifest.json            (Gestão: dono do estabelecimento)
+//   /{slug}                     -> /api/manifest?app=catalogo (cliente final, sem login)
+//   /{slug}/agenda              -> /api/manifest?app=agenda   (profissionais)
 export default function Document() {
   return (
     <Html lang="pt-BR">
       <Head>
-        {/* Carrega Tailwind CSS de forma simples e rápida */}
-        <script src="https://cdn.tailwindcss.com"></script>
-
-        {/* Configurações do PWA - E-Commerce */}
-        <link rel="manifest" href="/manifest.json" />
-        <link rel="apple-touch-icon" href="/icon-192.png" />
-        <meta name="theme-color" content="#2563EB" />
+        {/* Meta tags essenciais para iOS / Safari */}
         <meta name="apple-mobile-web-app-capable" content="yes" />
+        <meta name="mobile-web-app-capable" content="yes" />
         <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
-        <meta name="apple-mobile-web-app-title" content="Loja Virtual" />
       </Head>
-      <body className="bg-gray-950 text-white font-sans antialiased">
+      <body>
         <Main />
         <NextScript />
       </body>
