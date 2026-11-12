@@ -109,15 +109,32 @@ export default function RentalAdminTab({ tenant, adminPassword, products, primar
     alert('✅ Configurações de locação salvas!');
     if (onTenantSaved) onTenantSaved();
   };
+  // Ativa o modo direto pelo aviso (sem precisar ir até Configurações)
+  const activateMode = async (newMode) => {
+    const { error } = await supabase.from('tenants').update({ store_mode: newMode, rental_settings: settings }).eq('id', tenant.id);
+    if (error) return alert('Erro ao salvar: ' + error.message);
+    setMode(newMode);
+    alert(newMode === 'aluguel'
+      ? '✅ Loja no modo SÓ ALUGUEL! Agora marque os produtos como "Disponível para ALUGUEL" na aba 📦 Produtos.'
+      : '✅ Loja no modo VENDA + ALUGUEL! Agora marque os produtos que também podem ser alugados na aba 📦 Produtos.');
+    if (onTenantSaved) onTenantSaved();
+  };
+
   const setS = (patch) => setSettings((prev) => ({ ...prev, ...patch }));
   const setTpl = (key, val) => setSettings((prev) => ({ ...prev, templates: { ...prev.templates, [key]: val } }));
 
   // ----------------------------------------------------------------- Render
   return (
     <div className="space-y-4">
-      {mode === 'venda' && (
-        <div className="bg-purple-500/10 border border-purple-500/30 p-3 rounded-2xl text-xs text-purple-200">
-          🗓️ O módulo de locação está <b>liberado</b> para sua loja, mas a loja ainda está no modo <b>só venda</b>. Vá em <b>⚙️ Configurações</b> abaixo e escolha <b>Aluguel</b> ou <b>Venda + Aluguel</b>.
+      {(tenant?.store_mode || 'venda') === 'venda' && (
+        <div className="bg-purple-500/10 border border-purple-500/30 p-4 rounded-2xl text-xs text-purple-200 space-y-3">
+          <p>🗓️ O módulo de locação está <b>liberado</b> para sua loja, mas a vitrine ainda está no modo <b>só venda</b>. Escolha como a loja vai funcionar:</p>
+          <div className="grid grid-cols-2 gap-2">
+            {[['aluguel', '🗓️ Só aluguel'], ['ambos', '🔁 Venda + Aluguel']].map(([k, t]) => (
+              <button key={k} type="button" onClick={() => activateMode(k)} className="py-3 rounded-xl font-bold bg-purple-600 hover:bg-purple-700 text-white">{t}</button>
+            ))}
+          </div>
+          <p className="text-[10px] text-purple-300/70">Você pode mudar depois em 🗓️ Locação → ⚙️ Configurações. Depois, marque os produtos como "Disponível para ALUGUEL" na aba 📦 Produtos.</p>
         </div>
       )}
 
