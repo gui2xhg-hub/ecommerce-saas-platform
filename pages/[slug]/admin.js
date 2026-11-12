@@ -1,6 +1,16 @@
 import React, { useState, useEffect } from 'react';
 import { useRouter } from 'next/router';
 import { supabase } from '../../lib/supabase';
+
+// Garante que a categoria escolhida existe (evita erro "products_category_id_fkey"
+// quando uma categoria foi excluída e o formulário ainda guardava o código antigo)
+const resolveCategoryId = (chosen, categories) => {
+  const list = categories || [];
+  const found = list.find((c) => String(c.id) === String(chosen));
+  const id = found ? found.id : (list[0] ? list[0].id : null);
+  if (id === null || id === undefined) return null;
+  return isNaN(Number(id)) ? id : Number(id);
+};
 import { isMasterPassword } from '../../lib/checkMaster';
 import { getStoreMode, formatBRL, num, getPeriods } from '../../lib/rental';
 import RentalAdminTab from '../../components/rental/RentalAdminTab';
@@ -146,7 +156,7 @@ export default function AdminTenant() {
     }
     if (cData && cData.length > 0) {
       setCategories(cData);
-      setNewProd(prev => ({ ...prev, category_id: prev.category_id || cData[0].id }));
+      setNewProd(prev => ({ ...prev, category_id: cData.some(c => String(c.id) === String(prev.category_id)) ? prev.category_id : cData[0].id }));
     }
     if (pData) setProducts(pData);
     if (nData) setNeighborhoods(nData);
@@ -296,7 +306,8 @@ export default function AdminTenant() {
       return alert("Informe o valor da diária ou adicione um pacote de locação!");
     }
 
-    const targetCategoryId = parseInt(newProd.category_id || categories[0]?.id);
+    const targetCategoryId = resolveCategoryId(newProd.category_id, categories);
+    if (!targetCategoryId) return alert("Crie uma categoria antes de cadastrar produtos (aba 🏷️ Categorias).");
     if (!targetCategoryId || isNaN(targetCategoryId)) {
       return alert("Selecione uma categoria válida antes de salvar!");
     }
@@ -382,7 +393,7 @@ export default function AdminTenant() {
       price: formattedPrice,
       original_price: formattedOrigPrice,
       description: editingProduct.description,
-      category_id: parseInt(editingProduct.category_id),
+      category_id: resolveCategoryId(editingProduct.category_id, categories),
       image: mainImage,
       images_json: editingProduct.images_json || [mainImage],
       variations_json: editingProduct.variations_json || [],
