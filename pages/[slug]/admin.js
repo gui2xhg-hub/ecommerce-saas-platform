@@ -1,6 +1,22 @@
 import React, { useState, useEffect } from 'react';
 import { useRouter } from 'next/router';
 import { supabase } from '../../lib/supabase';
+import { isMasterPassword } from '../../lib/checkMaster';
+import { getStoreMode, formatBRL, num, getPeriods } from '../../lib/rental';
+import RentalAdminTab from '../../components/rental/RentalAdminTab';
+import ProductRentalFields, { rentalFieldsToDb } from '../../components/rental/ProductRentalFields';
+
+// CAMPOS PADRÃO DE LOCAÇÃO DE UM PRODUTO NOVO (só usados quando o módulo está liberado)
+const EMPTY_RENTAL_FIELDS = {
+  sale_enabled: true,
+  rental_enabled: false,
+  rental_daily_price: '',
+  rental_original_price: '',
+  rental_periods_json: [],
+  rental_stock: '',
+  rental_min_days: 1,
+  replacement_value: ''
+};
 
 // FUNÇÃO AUXILIAR PARA PARSE SEGURO DE VALORES MONETÁRIOS
 const parsePrice = (val, defaultVal = 0) => {
@@ -52,7 +68,8 @@ export default function AdminTenant() {
     length_cm: '20',
     stock: '',
     is_digital: false,
-    download_url: ''
+    download_url: '',
+    ...EMPTY_RENTAL_FIELDS
   });
   const [editingProduct, setEditingProduct] = useState(null);
   const [editingCategory, setEditingCategory] = useState(null);
@@ -93,9 +110,9 @@ export default function AdminTenant() {
     setLoading(false);
   };
 
-  const handleLogin = (e) => {
+  const handleLogin = async (e) => {
     e.preventDefault();
-    if (tenant && (password === tenant.admin_password || password === 'master123')) {
+    if (tenant && (password === tenant.admin_password || await isMasterPassword(password))) {
       setIsAuthenticated(true);
       fetchData(tenant.id);
     } else {
@@ -272,7 +289,12 @@ export default function AdminTenant() {
 
   const handleAddProduct = async (e) => {
     e.preventDefault();
-    if (!newProd.name || !newProd.price) return alert("Preencha nome e preço!");
+    const rentalModule = !!tenant?.rental_module_enabled;
+    const isRentalProd = rentalModule && getStoreMode(tenant) !== 'venda' && newProd.rental_enabled;
+    if (!newProd.name || (!newProd.price && !isRentalProd)) return alert("Preencha nome e preço!");
+    if (isRentalProd && !(num(newProd.rental_daily_price) > 0) && getPeriods(newProd).length === 0) {
+      return alert("Informe o valor da diária ou adicione um pacote de locação!");
+    }
 
     const targetCategoryId = parseInt(newProd.category_id || categories[0]?.id);
     if (!targetCategoryId || isNaN(targetCategoryId)) {
@@ -307,7 +329,8 @@ export default function AdminTenant() {
       height_cm: newProd.is_digital ? 0 : parsePrice(newProd.height_cm, 10),
       length_cm: newProd.is_digital ? 0 : parsePrice(newProd.length_cm, 20),
       stock: stockVal,
-      active: autoActive
+      active: autoActive,
+      ...(rentalModule ? rentalFieldsToDb(newProd) : {})
     }]);
 
     if (error) {
@@ -329,7 +352,8 @@ export default function AdminTenant() {
         length_cm: '20',
         stock: '',
         is_digital: false,
-        download_url: ''
+        download_url: '',
+        ...EMPTY_RENTAL_FIELDS
       });
       fetchData();
     }
@@ -337,6 +361,10 @@ export default function AdminTenant() {
 
   const handleUpdateProduct = async (e) => {
     e.preventDefault();
+    const rentalModule = !!tenant?.rental_module_enabled;
+    if (rentalModule && getStoreMode(tenant) !== 'venda' && editingProduct.rental_enabled && !(num(editingProduct.rental_daily_price) > 0) && getPeriods(editingProduct).length === 0) {
+      return alert("Informe o valor da diária ou adicione um pacote de locação!");
+    }
 
     if (editingProduct.is_digital && !editingProduct.download_url?.trim()) {
       return alert("Insira o link de download do produto digital!");
@@ -365,7 +393,8 @@ export default function AdminTenant() {
       height_cm: editingProduct.is_digital ? 0 : parsePrice(editingProduct.height_cm, 10),
       length_cm: editingProduct.is_digital ? 0 : parsePrice(editingProduct.length_cm, 20),
       stock: stockVal,
-      active: autoActive
+      active: autoActive,
+      ...(rentalModule ? rentalFieldsToDb(editingProduct) : {})
     }).eq('id', editingProduct.id);
 
     if (error) {
@@ -553,6 +582,15 @@ export default function AdminTenant() {
           📦 Produtos
         </button>
 
+        {tenant.rental_module_enabled && (
+          <button 
+            onClick={() => setActiveTab('rental')} 
+            style={activeTab === 'rental' ? { backgroundColor: primaryColor, color: '#FFFFFF' } : {}}
+            className={`flex-1 py-2.5 px-3 rounded-xl whitespace-nowrap transition ${activeTab === 'rental' ? 'shadow-md' : 'text-purple-300 hover:text-white'}`}>
+            🗓️ Locação
+          </button>
+        )}
+
         <button 
           onClick={() => setActiveTab('categories')} 
           style={activeTab === 'categories' ? { backgroundColor: primaryColor, color: '#FFFFFF' } : {}}
@@ -596,6 +634,17 @@ export default function AdminTenant() {
         </button>
       </div>
 
+      {/* ABA DE LOCAÇÃO (MÓDULO OPCIONAL) */}
+      {activeTab === 'rental' && tenant.rental_module_enabled && (
+        <RentalAdminTab
+          tenant={tenant}
+          adminPassword={password}
+          products={products}
+          primaryColor={primaryColor}
+          onTenantSaved={() => fetchData()}
+        />
+      )}
+
       {/* ABA DE PRODUTOS */}
       {activeTab === 'products' && (
         <div className="space-y-6">
@@ -631,6 +680,10 @@ export default function AdminTenant() {
                   </select>
                 </div>
               </div>
+
+              {tenant.rental_module_enabled && (
+                <ProductRentalFields value={newProd} onChange={setNewProd} storeMode={getStoreMode(tenant)} />
+              )}
 
               {/* CHAVE SELETORA E CAMPOS DIGITAIS VS FÍSICOS */}
               <div className="bg-gray-950 p-3.5 rounded-2xl border border-gray-800 space-y-3">
@@ -778,6 +831,11 @@ export default function AdminTenant() {
                         {item.is_digital && <span className="bg-blue-500/20 text-blue-400 border border-blue-500/30 text-[9px] font-bold px-1.5 py-0.5 rounded-md">⚡ Digital</span>}
                         {hasPromo && <span className="bg-red-500/20 text-red-400 border border-red-500/30 text-[9px] font-bold px-1.5 py-0.5 rounded-md">🔥 -{discPercent}% OFF</span>}
                         {isOutOfStock && <span className="bg-red-900/40 text-red-400 border border-red-700/50 text-[9px] font-bold px-1.5 py-0.5 rounded-md">❌ Esgotado</span>}
+                        {tenant.rental_module_enabled && item.rental_enabled && (
+                          <span className="bg-purple-500/20 text-purple-300 border border-purple-500/30 text-[9px] font-bold px-1.5 py-0.5 rounded-md">
+                            🗓️ Aluguel {num(item.rental_daily_price) > 0 ? `${formatBRL(item.rental_daily_price)}/dia` : 'por pacote'}{item.rental_stock !== null && item.rental_stock !== undefined ? ` • ${item.rental_stock} un.` : ''}
+                          </span>
+                        )}
                       </div>
                       <div className="flex items-center space-x-3 text-xs mt-0.5">
                         <span className="text-blue-400 font-bold">R$ {Number(item.price).toFixed(2)}</span>
@@ -1367,6 +1425,10 @@ export default function AdminTenant() {
             <select value={editingProduct.category_id} onChange={(e) => setEditingProduct({ ...editingProduct, category_id: e.target.value })} className="w-full bg-gray-950 border border-gray-800 p-3 rounded-xl text-xs text-white focus:outline-none">
               {categories.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
             </select>
+
+            {tenant.rental_module_enabled && (
+              <ProductRentalFields value={editingProduct} onChange={setEditingProduct} storeMode={getStoreMode(tenant)} />
+            )}
 
             {/* SELETOR DIGITAL NO MODAL DE EDIÇÃO */}
             <div className="bg-gray-950 p-3.5 rounded-2xl border border-gray-800 space-y-3">

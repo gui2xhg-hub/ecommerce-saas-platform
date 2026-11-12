@@ -1,6 +1,15 @@
 import React, { useState, useEffect } from 'react';
 import { useRouter } from 'next/router';
 import { supabase } from '../../lib/supabase';
+import {
+  getStoreMode, getRentalSettings, countRentalDays, validateRentalDates, computeRentalUnitPrice, displayDailyPrice,
+  hasRentalPromo, computeDeposit, computeDownPayment, formatBRL, num, round2, onlyDigits,
+  isValidCPF, isValidCNPJ, formatDocument, getPeriods
+} from '../../lib/rental';
+import {
+  RentalDateBar, AvailabilityBadge, CompanyAccessModal, TermsModal, buildRentalStoreMessage,
+  loadSavedRentalCustomer, saveRentalCustomer, refreshRentalCustomer
+} from '../../components/rental/StoreRental';
 
 export default function EcommerceCliente() {
   const router = useRouter();
@@ -65,6 +74,62 @@ export default function EcommerceCliente() {
   const [appliedCoupon, setAppliedCoupon] = useState(null);
   const [couponMessage, setCouponMessage] = useState({ type: '', text: '' });
 
+  // ===== MÓDULO LOCAÇÃO (só aparece quando a loja está em modo Aluguel ou Venda + Aluguel) =====
+  const [rentalStart, setRentalStart] = useState('');
+  const [rentalEnd, setRentalEnd] = useState('');
+  const [availability, setAvailability] = useState({});
+  const [availabilityTick, setAvailabilityTick] = useState(0);
+  const [buyMode, setBuyMode] = useState('venda'); // 'venda' | 'aluguel' no modal do produto
+  const [rentalCustomer, setRentalCustomer] = useState(null); // empresa/cliente aprovado (tabela de preço)
+  const [showCompanyModal, setShowCompanyModal] = useState(false);
+  const [showTermsModal, setShowTermsModal] = useState(false);
+  const [termsAccepted, setTermsAccepted] = useState(false);
+  const [customerDocument, setCustomerDocument] = useState('');
+  const [customerType, setCustomerType] = useState('PF');
+  const [deliveryTime, setDeliveryTime] = useState('');
+  const [returnTime, setReturnTime] = useState('');
+  const [wantAssembly, setWantAssembly] = useState(false);
+  const [rentalNotes, setRentalNotes] = useState('');
+
+  const storeMode = getStoreMode(tenant);
+  const rentalOn = storeMode !== 'venda';
+  const rentalSettings = getRentalSettings(tenant);
+  const rentalDays = countRentalDays(rentalStart, rentalEnd, rentalSettings.day_count_mode);
+  const rentalDateError = rentalStart && rentalEnd ? validateRentalDates(rentalSettings, rentalStart, rentalEnd) : '';
+  const rentalDiscount = rentalCustomer?.table ? num(rentalCustomer.table.discount_percent) : 0;
+  const saleDiscount = rentalCustomer?.table?.applies_to_sales ? rentalDiscount : 0;
+  const isRentalCart = cart.length > 0 && cart[0].type === 'aluguel';
+  const canRent = (p) => rentalOn && !!p?.rental_enabled;
+  const canBuy = (p) => storeMode === 'venda' || (storeMode === 'ambos' && p?.sale_enabled !== false);
+
+  // DISPONIBILIDADE DOS ITENS NAS DATAS ESCOLHIDAS
+  useEffect(() => {
+    if (!tenant?.id || !rentalOn || !rentalStart || !rentalEnd || rentalDateError) {
+      setAvailability({});
+      return;
+    }
+    let cancelled = false;
+    supabase
+      .rpc('rental_availability', { p_tenant_id: String(tenant.id), p_start: rentalStart, p_end: rentalEnd })
+      .then(({ data }) => {
+        if (cancelled || !data) return;
+        const map = {};
+        data.forEach((r) => { map[String(r.product_id)] = r; });
+        setAvailability(map);
+      });
+    return () => { cancelled = true; };
+  }, [tenant?.id, rentalOn, rentalStart, rentalEnd, rentalDateError, availabilityTick]);
+
+  // PREENCHE O DOCUMENTO DO CLIENTE IDENTIFICADO (EMPRESA/CNPJ)
+  useEffect(() => {
+    if (rentalCustomer) {
+      setCustomerDocument(formatDocument(rentalCustomer.document));
+      setCustomerType(rentalCustomer.customer_type || (onlyDigits(rentalCustomer.document).length === 14 ? 'PJ' : 'PF'));
+      if (!customerName) setCustomerName(rentalCustomer.company_name || rentalCustomer.name || '');
+      if (!customerPhone) setCustomerPhone(rentalCustomer.phone || '');
+    }
+  }, [rentalCustomer]);
+
   useEffect(() => {
     if (router.isReady && slug) {
       fetchTenantData();
@@ -86,7 +151,8 @@ export default function EcommerceCliente() {
           if (data && data.status === 'approved') {
             setPixStatus('approved');
             if (currentOrderId) {
-              await supabase.from('orders').update({ is_paid: true }).eq('id', currentOrderId);
+              const isPartialRental = currentOrderPayload?.order_type === 'aluguel' && num(currentOrderPayload?.down_payment_value) < num(currentOrderPayload?.total);
+              await supabase.from('orders').update(isPartialRental ? { payment_method: 'PIX (sinal pago)' } : { is_paid: true }).eq('id', currentOrderId);
             }
             clearInterval(interval);
           }
@@ -98,7 +164,7 @@ export default function EcommerceCliente() {
     return () => {
       if (interval) clearInterval(interval);
     };
-  }, [showPixModal, pixPaymentId, pixStatus, tenant, currentOrderId]);
+  }, [showPixModal, pixPaymentId, pixStatus, tenant, currentOrderId, currentOrderPayload]);
 
   // CARROSSEL AUTOMÁTICO DE BANNERS
   const promoBannerList = tenant?.promo_banners ? tenant.promo_banners.split(',').map(b => b.trim()).filter(Boolean) : [];
@@ -147,6 +213,17 @@ export default function EcommerceCliente() {
       if (cData) setCategories(cData);
       if (pData) setProducts(pData);
       if (nData) setNeighborhoods(nData);
+
+      // Empresa/cliente já identificado neste aparelho: confere se continua aprovado
+      if (tData.rental_module_enabled) {
+        const saved = loadSavedRentalCustomer(tData.id);
+        if (saved) {
+          refreshRentalCustomer(tData.id, saved).then((c) => {
+            if (c) setRentalCustomer(c);
+            else saveRentalCustomer(tData.id, null);
+          });
+        }
+      }
     }
     setLoading(false);
   };
@@ -197,6 +274,10 @@ export default function EcommerceCliente() {
     setSelectedProduct(product);
     setProductQuantity(1);
     setProductNote('');
+    const rentable = canRent(product);
+    const buyable = canBuy(product);
+    const startAsRental = rentable && (!buyable || isRentalCart || (cart.length === 0 && storeMode === 'aluguel'));
+    setBuyMode(startAsRental ? 'aluguel' : 'venda');
 
     const gallery = product.images_json && Array.isArray(product.images_json) && product.images_json.length > 0 
       ? product.images_json 
@@ -210,7 +291,7 @@ export default function EcommerceCliente() {
           initialVars[v.attribute_name] = v.options[0];
         }
       });
-    } else if (!product.is_digital && (tenant?.niche === 'fashion' || !tenant?.niche)) {
+    } else if (!product.is_digital && !canRent(product) && (tenant?.niche === 'fashion' || !tenant?.niche)) {
       initialVars['Tamanho'] = 'M';
     }
 
@@ -230,6 +311,47 @@ export default function EcommerceCliente() {
     const variationEntries = Object.entries(selectedVariations);
     const variationsText = variationEntries.map(([key, val]) => `${key}: ${val}`).join(' | ');
 
+    // ----- LOCAÇÃO -----
+    if (buyMode === 'aluguel') {
+      if (!rentalStart || !rentalEnd) return alert('📅 Escolha a data de retirada e a de devolução.');
+      if (rentalDateError) return alert(rentalDateError);
+      const minDays = Math.max(1, parseInt(selectedProduct.rental_min_days, 10) || 1);
+      if (rentalDays < minDays) return alert(`Este item precisa de no mínimo ${minDays} dia(s) de locação.`);
+      const priceInfo = computeRentalUnitPrice(selectedProduct, rentalDays, rentalDiscount);
+      if (!priceInfo.available) return alert('Este item não tem preço de locação para esse período. Fale com a loja.');
+      const info = availability[String(selectedProduct.id)];
+      const alreadyInCart = cart.filter((i) => i.id === selectedProduct.id && i.type === 'aluguel').reduce((a, b) => a + b.quantity, 0);
+      if (info && info.available !== null && info.available !== undefined && productQuantity + alreadyInCart > info.available) {
+        return alert(info.available - alreadyInCart > 0 ? `Só há ${info.available - alreadyInCart} unidade(s) disponível(is) nessas datas.` : 'Item indisponível nessas datas.');
+      }
+      if (cart.length > 0 && !isRentalCart) {
+        if (!confirm('Seu carrinho tem itens de COMPRA. Para alugar, finalize a compra antes ou esvazie o carrinho.\n\nEsvaziar o carrinho e continuar com a locação?')) return;
+      }
+      const rentalItem = {
+        cartItemId: `R-${selectedProduct.id}-${JSON.stringify(selectedVariations)}-${Date.now()}`,
+        id: selectedProduct.id,
+        type: 'aluguel',
+        name: selectedProduct.name,
+        variations: selectedVariations,
+        variationsText,
+        price: priceInfo.unit,
+        quantity: productQuantity,
+        note: productNote,
+        image: activeImage || selectedProduct.image,
+        is_digital: false,
+        download_url: '',
+        replacement_value: num(selectedProduct.replacement_value),
+        rental_min_days: minDays
+      };
+      setCart(cart.length > 0 && !isRentalCart ? [rentalItem] : [...cart, rentalItem]);
+      setSelectedProduct(null);
+      return;
+    }
+
+    if (isRentalCart) {
+      if (!confirm('Seu carrinho tem itens de LOCAÇÃO. Para comprar, finalize a reserva antes ou esvazie o carrinho.\n\nEsvaziar o carrinho e continuar com a compra?')) return;
+    }
+
     const cartItem = {
       cartItemId: `${selectedProduct.id}-${JSON.stringify(selectedVariations)}-${Date.now()}`,
       id: selectedProduct.id,
@@ -237,6 +359,7 @@ export default function EcommerceCliente() {
       variations: selectedVariations,
       variationsText: variationsText,
       price: Number(selectedProduct.price),
+      base_price: Number(selectedProduct.price),
       quantity: productQuantity,
       note: productNote,
       image: activeImage || selectedProduct.image,
@@ -244,7 +367,7 @@ export default function EcommerceCliente() {
       download_url: selectedProduct.download_url || ''
     };
 
-    setCart([...cart, cartItem]);
+    setCart(isRentalCart ? [cartItem] : [...cart, cartItem]);
     setSelectedProduct(null);
 
     if (window.fbq) {
@@ -358,8 +481,22 @@ export default function EcommerceCliente() {
   const isAllDigital = cart.length > 0 && cart.every(item => item.is_digital);
 
   const sendWhatsAppNotification = (orderObj, isPaidConfirmed = false) => {
+    if (isRentalCart) {
+      const rentalMsg = buildRentalStoreMessage({
+        tenant, orderId: orderObj?.id, customerName, customerPhone, customerDocument,
+        items: pricedCart, start: rentalStart, end: rentalEnd, days: rentalDays,
+        deliveryLabel: rentalDeliveryType === 'ENTREGA' ? 'Entrega' : 'Retirada na loja',
+        address: rentalDeliveryType === 'ENTREGA' ? `${customerAddress}${selectedNeighborhood ? ` (${selectedNeighborhood.name})` : ''}` : '',
+        deliveryTime, returnTime, subtotal, discount: discountValue, couponCode: appliedCoupon?.code,
+        deliveryFee: activeShippingFee, assemblyFee, total, downPayment: rentalAmountNow, deposit: rentalDeposit,
+        payment: paymentMethod, tableName: rentalCustomer?.table?.name, notes: rentalNotes, paid: isPaidConfirmed
+      });
+      const wa = tenant.whatsapp ? tenant.whatsapp.replace(/\D/g, '') : '';
+      if (wa) window.open(`https://wa.me/${wa}?text=${encodeURIComponent(rentalMsg)}`, '_blank');
+      return;
+    }
     let orderTag = orderObj?.id ? ` #${orderObj.id}` : '';
-    let itemsText = cart.map(i => {
+    let itemsText = pricedCart.map(i => {
       let varStr = i.variationsText ? ` [${i.variationsText}]` : '';
       let digitalStr = i.is_digital ? ' ⚡ (Produto Digital)' : '';
       let txt = `• ${i.quantity}x ${i.name}${varStr}${digitalStr} (R$ ${(Number(i.price) * i.quantity).toFixed(2)})`;
@@ -423,11 +560,30 @@ export default function EcommerceCliente() {
   const selectedNeighborhood = neighborhoods.find(n => String(n.id) === String(selectedNeighId));
   const localShippingFee = selectedNeighborhood ? Number(selectedNeighborhood.fee) : 0;
 
-  const subtotal = cart.reduce((sum, item) => sum + (Number(item.price) * item.quantity), 0);
+  // PREÇO DE CADA ITEM: locação recalcula pelo período; tabela de preço (CNPJ) aplica o desconto
+  const pricedCart = cart.map((item) => {
+    if (item.type === 'aluguel') {
+      const prod = products.find((pp) => pp.id === item.id) || {};
+      const info = computeRentalUnitPrice(prod, rentalDays || 1, rentalDiscount);
+      return { ...item, price: info.available ? info.unit : 0, price_label: info.label, rental_ok: info.available };
+    }
+    if (saleDiscount > 0) {
+      const base = Number(item.base_price ?? item.price);
+      return { ...item, price: round2(base * (1 - saleDiscount / 100)) };
+    }
+    return item;
+  });
+
+  const subtotal = pricedCart.reduce((sum, item) => sum + (Number(item.price) * item.quantity), 0);
   const isFreeShipping = freeThreshold > 0 && subtotal >= freeThreshold;
 
+  // ENTREGA DA LOCAÇÃO: usa as taxas por bairro; respeita o que a loja liberou
+  const rentalDeliveryType = !rentalSettings.allow_delivery ? 'RETIRADA' : (!rentalSettings.allow_pickup ? 'ENTREGA' : deliveryType);
+
   let activeShippingFee = 0;
-  if (isAllDigital) {
+  if (isRentalCart) {
+    activeShippingFee = rentalDeliveryType === 'RETIRADA' ? 0 : localShippingFee;
+  } else if (isAllDigital) {
     activeShippingFee = 0;
   } else if (deliveryType === 'RETIRADA') {
     activeShippingFee = 0;
@@ -447,16 +603,210 @@ export default function EcommerceCliente() {
     if (discountValue > subtotal) discountValue = subtotal;
   }
 
-  const total = Math.max(0, subtotal - discountValue + activeShippingFee);
+  const assemblyFee = isRentalCart && rentalSettings.allow_assembly && wantAssembly ? num(rentalSettings.assembly_fee) : 0;
+  const total = Math.max(0, subtotal - discountValue + activeShippingFee + assemblyFee);
+  const rentalDeposit = isRentalCart ? computeDeposit(rentalSettings, pricedCart, subtotal) : 0;
+  const rentalAmountNow = isRentalCart ? computeDownPayment(rentalSettings, total) : total;
 
-  const promoProductsCount = products.filter(p => p.original_price && Number(p.original_price) > Number(p.price)).length;
+  // Modo venda: todos os produtos (como sempre). Modo aluguel/ambos: conforme marcado em cada produto.
+  const visibleProducts = storeMode === 'venda'
+    ? products
+    : products.filter(p => canRent(p) || canBuy(p));
+  const isOnPromo = (p) => (canBuy(p) && p.original_price && Number(p.original_price) > Number(p.price)) || (canRent(p) && hasRentalPromo(p));
+
+  const promoProductsCount = visibleProducts.filter(isOnPromo).length;
   
   const filteredProducts = selectedCat === 'ALL' 
-    ? products 
+    ? visibleProducts 
     : (selectedCat === 'OFFERS' 
-        ? products.filter(p => p.original_price && Number(p.original_price) > Number(p.price))
-        : products.filter(p => String(p.category_id) === String(selectedCat))
+        ? visibleProducts.filter(isOnPromo)
+        : visibleProducts.filter(p => String(p.category_id) === String(selectedCat))
       );
+
+  // =====================================================================
+  // FINALIZAR RESERVA DE LOCAÇÃO
+  // =====================================================================
+  const handleFinishRentalOrder = async (e) => {
+    e.preventDefault();
+    if (isSubmitting) return;
+    if (cart.length === 0) return alert("Sua reserva está vazia!");
+    if (!rentalStart || !rentalEnd) return alert("📅 Escolha a data de retirada e a de devolução.");
+    if (rentalDateError) return alert(rentalDateError);
+    const tooShort = pricedCart.find(i => rentalDays < (i.rental_min_days || 1));
+    if (tooShort) return alert(`"${tooShort.name}" precisa de no mínimo ${tooShort.rental_min_days} dia(s).`);
+    const noPrice = pricedCart.find(i => !i.rental_ok);
+    if (noPrice) return alert(`"${noPrice.name}" não tem preço de locação para ${rentalDays} dia(s). Remova o item ou fale com a loja.`);
+    const qtyById = {};
+    pricedCart.forEach(i => { qtyById[i.id] = (qtyById[i.id] || 0) + i.quantity; });
+    const short = Object.entries(qtyById).find(([id, q]) => { const a = availability[String(id)]; return a && a.available !== null && a.available !== undefined && q > a.available; });
+    if (short) {
+      const prodName = pricedCart.find(i => String(i.id) === String(short[0]))?.name;
+      return alert(`"${prodName}" tem só ${availability[String(short[0])].available} unidade(s) disponível(is) nessas datas.`);
+    }
+    if (!customerName || onlyDigits(customerPhone).length < 10) return alert("Preencha seu nome e WhatsApp com DDD!");
+    const docDigits = onlyDigits(customerDocument);
+    if (rentalSettings.require_document) {
+      const okDoc = customerType === 'PJ' ? isValidCNPJ(docDigits) : isValidCPF(docDigits);
+      if (!okDoc) return alert(`Informe um ${customerType === 'PJ' ? 'CNPJ' : 'CPF'} válido.`);
+    }
+    if (rentalDeliveryType === 'ENTREGA') {
+      if (!customerAddress) return alert("Preencha o endereço de entrega!");
+      if (neighborhoods.length > 0 && !selectedNeighId) return alert("Selecione o bairro de entrega!");
+    }
+    if (rentalSettings.require_terms && !termsAccepted) return alert("Leia e aceite o termo de locação para continuar.");
+
+    setIsSubmitting(true);
+
+    const shippingLabel = rentalDeliveryType === 'RETIRADA'
+      ? 'Retirar na Loja'
+      : (selectedNeighborhood ? `Bairro: ${selectedNeighborhood.name}` : 'Entrega');
+
+    const orderPayload = {
+      tenant_id: tenant.id,
+      customer_name: customerName,
+      customer_phone: customerPhone,
+      address: rentalDeliveryType === 'ENTREGA' ? customerAddress : 'Retirada na Loja',
+      neighborhood: shippingLabel + (assemblyFee > 0 ? ' + Montagem' : ''),
+      items: pricedCart.map(i => ({
+        id: i.id,
+        name: i.name,
+        quantity: i.quantity,
+        price: Number(i.price),
+        size: i.variationsText || 'Padrão',
+        variationsText: i.variationsText || '',
+        note: i.note || '',
+        is_digital: false,
+        download_url: '',
+        rental: true,
+        price_label: i.price_label || '',
+        replacement_value: num(i.replacement_value)
+      })),
+      subtotal: Number(subtotal.toFixed(2)),
+      delivery_fee: Number((activeShippingFee + assemblyFee).toFixed(2)),
+      total: Number(total.toFixed(2)),
+      payment_method: paymentMethod,
+      status: 'recebido',
+      is_paid: false,
+      order_type: 'aluguel',
+      rental_start: rentalStart,
+      rental_end: rentalEnd,
+      rental_days: rentalDays,
+      rental_status: 'reservado',
+      deposit_value: rentalDeposit,
+      deposit_status: rentalDeposit > 0 ? 'pendente' : null,
+      down_payment_value: Number(rentalAmountNow.toFixed(2)),
+      customer_document: docDigits,
+      customer_type: customerType,
+      rental_customer_id: rentalCustomer?.id || null,
+      price_table_name: rentalCustomer?.table?.name || null,
+      price_table_discount: rentalDiscount,
+      terms_accepted_at: rentalSettings.require_terms ? new Date().toISOString() : null,
+      delivery_time: deliveryTime,
+      return_time: returnTime,
+      rental_notes: rentalNotes
+    };
+
+    // Grava conferindo o estoque no banco (trava contra duas reservas ao mesmo tempo)
+    const { data: insertedOrder, error: insertErr } = await supabase.rpc('create_rental_order', { p_order: orderPayload });
+
+    if (insertErr || !insertedOrder) {
+      const msg = String(insertErr?.message || 'Erro desconhecido');
+      setAvailabilityTick(t => t + 1);
+      setIsSubmitting(false);
+      if (msg.includes('SEM_ESTOQUE') || msg.includes('DADOS_INVALIDOS')) return alert('⚠️ ' + msg.replace(/^(SEM_ESTOQUE|DADOS_INVALIDOS):\s*/, ''));
+      return alert("⚠️ Erro ao salvar a reserva:\n" + msg);
+    }
+
+    saveOrderIdToLocal(insertedOrder.id);
+    setCurrentOrderId(insertedOrder.id);
+    setCurrentOrderPayload({ ...orderPayload, shippingLabel });
+
+    if (window.fbq) {
+      window.fbq('track', 'Purchase', { value: total, currency: 'BRL' });
+    }
+
+    // WhatsApp automático (se a loja configurou a API). Sem API, abrimos o WhatsApp da loja como sempre.
+    let storeNotifiedByApi = false;
+    try {
+      const waRes = await fetch('/api/rental-whatsapp', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'send', tenant_id: tenant.id, order_id: insertedOrder.id, event: 'pedido_recebido' })
+      });
+      const waData = await waRes.json();
+      storeNotifiedByApi = !!(waData && waData.sent && waData.store_sent);
+    } catch (err) {
+      console.error('WhatsApp automático indisponível:', err);
+    }
+
+    const isPartial = rentalAmountNow < total;
+    const payDescription = `Reserva #${insertedOrder.id}${isPartial ? ' (sinal)' : ''} - ${tenant.name}`;
+
+    if (paymentMethod === 'PIX' && tenant.pix_enabled && tenant.pix_access_token) {
+      try {
+        const mpRes = await fetch('/api/create-pix', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            amount: Number(rentalAmountNow.toFixed(2)),
+            description: payDescription,
+            accessToken: tenant.pix_access_token,
+            orderId: insertedOrder.id,
+            payer: { email: `${onlyDigits(customerPhone) || 'cliente'}@sac.com`, name: customerName }
+          })
+        });
+        const mpData = await mpRes.json();
+        if (mpRes.ok && mpData.qr_code_base64) {
+          setPixQrCodeBase64(mpData.qr_code_base64);
+          setPixCopyPaste(mpData.qr_code);
+          setPixPaymentId(mpData.id);
+          setPixStatus('pending');
+          setShowPixModal(true);
+          setShowCartModal(false);
+          setIsSubmitting(false);
+          return;
+        }
+        alert(`⚠️ Sua reserva #${insertedOrder.id} foi registrada, mas não foi possível gerar o PIX:\n${mpData.error || 'Fale com a loja.'}`);
+      } catch (err) {
+        alert(`⚠️ Sua reserva #${insertedOrder.id} foi registrada, mas houve erro ao gerar o PIX. Fale com a loja.`);
+      }
+    } else if (paymentMethod.includes('Cartão') && tenant.pix_access_token) {
+      try {
+        const prefRes = await fetch('/api/create-preference', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            items: [{ name: payDescription, quantity: 1, price: Number(rentalAmountNow.toFixed(2)) }],
+            accessToken: tenant.pix_access_token,
+            orderId: insertedOrder.id,
+            tenantName: tenant.name,
+            customerName,
+            customerPhone
+          })
+        });
+        const prefData = await prefRes.json();
+        if (prefRes.ok && prefData.init_point) {
+          if (!storeNotifiedByApi) sendWhatsAppNotification(insertedOrder, false);
+          setIsSubmitting(false);
+          setCart([]);
+          setShowCartModal(false);
+          window.location.href = prefData.init_point;
+          return;
+        }
+        alert(`⚠️ Sua reserva #${insertedOrder.id} foi registrada, mas não foi possível abrir o pagamento com cartão:\n${prefData.error || 'Fale com a loja.'}`);
+      } catch (err) {
+        alert(`⚠️ Sua reserva #${insertedOrder.id} foi registrada, mas houve erro ao abrir o pagamento. Fale com a loja.`);
+      }
+    }
+
+    if (!storeNotifiedByApi) sendWhatsAppNotification(insertedOrder, false);
+    setIsSubmitting(false);
+    setCart([]);
+    setShowCartModal(false);
+    setTermsAccepted(false);
+    alert(`✅ Reserva #${insertedOrder.id} registrada com sucesso!`);
+    router.push(`/${slug}/pedido/${insertedOrder.id}`);
+  };
 
   const handleFinishOrder = async (e) => {
     e.preventDefault();
@@ -502,7 +852,7 @@ export default function EcommerceCliente() {
       customer_phone: customerPhone,
       address: isAllDigital ? '⚡ Produto Digital - Envio via WhatsApp / Download' : (deliveryType === 'ENTREGA' ? customerAddress : 'Retirada na Loja'),
       neighborhood: shippingLabel,
-      items: cart.map(i => ({
+      items: pricedCart.map(i => ({
         id: i.id,
         name: i.name,
         quantity: i.quantity,
@@ -592,7 +942,7 @@ export default function EcommerceCliente() {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            items: cart.map(i => ({ name: i.name, quantity: i.quantity, price: Number(i.price) })),
+            items: pricedCart.map(i => ({ name: i.name, quantity: i.quantity, price: Number(i.price) })),
             accessToken: tenant.pix_access_token,
             orderId: insertedOrder.id,
             tenantName: tenant.name,
@@ -633,7 +983,13 @@ export default function EcommerceCliente() {
   if (!tenant) return <div className="min-h-screen bg-gray-950 text-white flex items-center justify-center font-sans"><h1 className="text-xl font-bold text-orange-500">Loja não encontrada</h1></div>;
 
   const hasCustomVariations = selectedProduct?.variations_json && Array.isArray(selectedProduct.variations_json) && selectedProduct.variations_json.length > 0;
-  const isFashionFallback = !selectedProduct?.is_digital && !hasCustomVariations && (tenant?.niche === 'fashion' || !tenant?.niche);
+  const isFashionFallback = buyMode !== 'aluguel' && !canRent(selectedProduct) && !selectedProduct?.is_digital && !hasCustomVariations && (tenant?.niche === 'fashion' || !tenant?.niche);
+  const rentalColors = { primary: primaryColor, btnText: btnTextColor, bg: bgColor, card: cardColor, text: textColor };
+  const selectedRentalInfo = selectedProduct && buyMode === 'aluguel' ? computeRentalUnitPrice(selectedProduct, rentalDays || 1, rentalDiscount) : null;
+  const selectedAvailability = selectedProduct ? availability[String(selectedProduct.id)] : null;
+  const modalUnitPrice = buyMode === 'aluguel'
+    ? (selectedRentalInfo?.unit || 0)
+    : (selectedProduct ? round2(Number(selectedProduct.price) * (1 - saleDiscount / 100)) : 0);
 
   const productGallery = selectedProduct?.images_json && Array.isArray(selectedProduct.images_json) && selectedProduct.images_json.length > 0
     ? selectedProduct.images_json
@@ -643,6 +999,112 @@ export default function EcommerceCliente() {
   const selectedProductSavings = selectedProductHasPromo ? (Number(selectedProduct.original_price) - Number(selectedProduct.price)) : 0;
 
   const cleanTenantWhatsapp = tenant?.whatsapp ? tenant.whatsapp.replace(/\D/g, '') : '';
+
+  // =====================================================================
+  // CHECKOUT DA LOCAÇÃO
+  // =====================================================================
+  const renderRentalCheckout = () => {
+    const field = { backgroundColor: bgColor, color: textColor };
+    const cls = 'w-full border border-white/10 p-2.5 rounded-xl text-xs focus:outline-none';
+    const shortItems = pricedCart.filter(i => { const a = availability[String(i.id)]; return a && a.available !== null && a.available !== undefined && i.quantity > a.available; });
+    return (
+      <form onSubmit={handleFinishRentalOrder} className="space-y-3 pt-2 border-t border-white/10">
+        <RentalDateBar start={rentalStart} end={rentalEnd} onChange={(a, b) => { setRentalStart(a); setRentalEnd(b); }} days={rentalDays} error={rentalDateError} settings={rentalSettings} colors={rentalColors} />
+        {shortItems.length > 0 && (
+          <div className="text-[11px] text-red-400 font-bold">⚠️ Sem estoque suficiente nessas datas: {shortItems.map(i => i.name).join(', ')}</div>
+        )}
+
+        {rentalSettings.allow_delivery && rentalSettings.allow_pickup && (
+          <div className="flex space-x-2">
+            {[['ENTREGA', '🚚 Entrega'], ['RETIRADA', '🏪 Retirar na Loja']].map(([k, t]) => (
+              <button key={k} type="button" onClick={() => setDeliveryType(k)}
+                style={{ backgroundColor: rentalDeliveryType === k ? primaryColor : bgColor, color: rentalDeliveryType === k ? btnTextColor : textColor }}
+                className="w-1/2 py-2 rounded-xl text-xs font-bold border border-white/10">{t}</button>
+            ))}
+          </div>
+        )}
+
+        {rentalDeliveryType === 'ENTREGA' && (
+          <>
+            {neighborhoods.length > 0 && (
+              <select value={selectedNeighId} onChange={(e) => setSelectedNeighId(e.target.value)} style={field} className={`${cls} font-bold`}>
+                <option value="">-- Selecione o bairro de entrega --</option>
+                {neighborhoods.map(n => <option key={n.id} value={n.id}>{n.name} — R$ {Number(n.fee).toFixed(2)}</option>)}
+              </select>
+            )}
+            <input type="text" value={customerAddress} onChange={(e) => setCustomerAddress(e.target.value)} placeholder="Endereço completo do evento/entrega" style={field} className={cls} />
+          </>
+        )}
+        {rentalDeliveryType === 'RETIRADA' && <p className="text-[11px] opacity-70">🏪 Você retira e devolve os itens na loja.</p>}
+
+        {rentalSettings.allow_assembly && (
+          <label className="flex items-center space-x-2 text-xs cursor-pointer">
+            <input type="checkbox" checked={wantAssembly} onChange={(e) => setWantAssembly(e.target.checked)} />
+            <span>🛠️ Quero montagem (+ {formatBRL(rentalSettings.assembly_fee)})</span>
+          </label>
+        )}
+
+        {rentalSettings.ask_times && (
+          <div className="grid grid-cols-2 gap-2">
+            <div>
+              <label className="text-[10px] opacity-70 block mb-0.5">Horário {rentalDeliveryType === 'ENTREGA' ? 'da entrega' : 'da retirada'}:</label>
+              <input type="time" value={deliveryTime} onChange={(e) => setDeliveryTime(e.target.value)} style={field} className={cls} />
+            </div>
+            <div>
+              <label className="text-[10px] opacity-70 block mb-0.5">Horário da devolução:</label>
+              <input type="time" value={returnTime} onChange={(e) => setReturnTime(e.target.value)} style={field} className={cls} />
+            </div>
+          </div>
+        )}
+
+        <input type="text" required value={customerName} onChange={(e) => setCustomerName(e.target.value)} placeholder={customerType === 'PJ' ? 'Nome da empresa / responsável' : 'Seu nome'} style={field} className={cls} />
+        <input type="text" required value={customerPhone} onChange={(e) => setCustomerPhone(e.target.value)} placeholder="Seu WhatsApp com DDD" style={field} className={cls} />
+
+        {rentalSettings.require_document && (
+          <div className="grid grid-cols-3 gap-2">
+            <select value={customerType} onChange={(e) => setCustomerType(e.target.value)} style={field} className={cls}>
+              <option value="PF">CPF</option>
+              <option value="PJ">CNPJ</option>
+            </select>
+            <input type="text" value={customerDocument} onChange={(e) => setCustomerDocument(e.target.value)} placeholder={customerType === 'PJ' ? '00.000.000/0000-00' : '000.000.000-00'} style={field} className={`${cls} col-span-2`} />
+          </div>
+        )}
+
+        <input type="text" value={rentalNotes} onChange={(e) => setRentalNotes(e.target.value)} placeholder="Observações (tipo de evento, acesso, referência...)" style={field} className={cls} />
+
+        <select value={paymentMethod} onChange={(e) => setPaymentMethod(e.target.value)} style={field} className={cls}>
+          <option value="PIX">PIX</option>
+          <option value="Cartão de Crédito">Cartão de Crédito</option>
+          <option value="Cartão de Débito">Cartão de Débito</option>
+          <option value="Dinheiro">Dinheiro</option>
+        </select>
+
+        <div style={{ backgroundColor: bgColor }} className="p-3 rounded-xl border border-white/10 space-y-1 text-xs">
+          <div className="flex justify-between"><span className="opacity-60">Locação ({rentalDays || 0} dia(s)):</span><span>{formatBRL(subtotal)}</span></div>
+          {rentalDiscount > 0 && <div className="flex justify-between text-green-400 text-[11px]"><span>Tabela {rentalCustomer.table.name}:</span><span>-{rentalDiscount}% já aplicado</span></div>}
+          {discountValue > 0 && <div className="flex justify-between text-green-400 font-bold"><span>Desconto ({appliedCoupon?.code}):</span><span>-{formatBRL(discountValue)}</span></div>}
+          <div className="flex justify-between"><span className="opacity-60">Entrega:</span><span>{rentalDeliveryType === 'RETIRADA' ? 'Retirada (grátis)' : formatBRL(activeShippingFee)}</span></div>
+          {assemblyFee > 0 && <div className="flex justify-between"><span className="opacity-60">Montagem:</span><span>{formatBRL(assemblyFee)}</span></div>}
+          <div className="flex justify-between font-bold text-sm pt-1 border-t border-white/10" style={{ color: primaryColor }}><span>TOTAL:</span><span>{formatBRL(total)}</span></div>
+          {rentalAmountNow < total && <div className="flex justify-between font-bold text-purple-300"><span>💳 Sinal para reservar agora:</span><span>{formatBRL(rentalAmountNow)}</span></div>}
+          {rentalDeposit > 0 && (
+            <div className="text-[11px] text-orange-300 pt-1">🔒 Caução: <b>{formatBRL(rentalDeposit)}</b> — {rentalSettings.deposit_note}</div>
+          )}
+        </div>
+
+        {rentalSettings.require_terms && (
+          <label className="flex items-start space-x-2 text-[11px] cursor-pointer">
+            <input type="checkbox" checked={termsAccepted} onChange={(e) => setTermsAccepted(e.target.checked)} className="mt-0.5" />
+            <span>Li e aceito o <button type="button" onClick={() => setShowTermsModal(true)} className="underline font-bold" style={{ color: primaryColor }}>termo de locação</button>, incluindo os valores de reposição em caso de dano.</span>
+          </label>
+        )}
+
+        <button type="submit" disabled={isSubmitting} style={{ backgroundColor: primaryColor, color: btnTextColor }} className="w-full font-bold py-3.5 rounded-xl text-xs shadow-lg transition hover:opacity-90 disabled:opacity-60">
+          {isSubmitting ? 'Reservando...' : (rentalAmountNow < total ? `Reservar e pagar sinal de ${formatBRL(rentalAmountNow)} 🚀` : 'Confirmar Reserva 🚀')}
+        </button>
+      </form>
+    );
+  };
 
   return (
     <div className="min-h-screen font-sans pb-24 max-w-md mx-auto transition-colors duration-300 relative flex flex-col justify-between" style={{ backgroundColor: bgColor, color: textColor }}>
@@ -666,6 +1128,16 @@ export default function EcommerceCliente() {
               <span>📦 Meus Pedidos</span>
             </button>
 
+            {rentalOn && (rentalSettings.allow_company_signup || rentalCustomer) && (
+              <button
+                onClick={() => rentalCustomer
+                  ? (confirm(`Sair da conta ${rentalCustomer.company_name || rentalCustomer.name}?`) && (saveRentalCustomer(tenant.id, null), setRentalCustomer(null)))
+                  : setShowCompanyModal(true)}
+                className="bg-gray-900/90 hover:bg-black text-white font-bold text-[10px] px-3 py-1.5 rounded-full border border-white/20 shadow-lg transition">
+                {rentalCustomer ? `🏢 ${(rentalCustomer.company_name || rentalCustomer.name).split(' ')[0]}` : '🏢 Sou empresa'}
+              </button>
+            )}
+
             {tenant.instagram_url && (
               <a
                 href={tenant.instagram_url.startsWith('http') ? tenant.instagram_url : `https://${tenant.instagram_url}`}
@@ -681,7 +1153,7 @@ export default function EcommerceCliente() {
             <img src={tenant.logo_url || 'https://images.unsplash.com/photo-1522335789203-aabd1fc54bc9?w=150&auto=format&fit=crop&q=80'} alt="Logo" className="w-16 h-16 rounded-full border-2 border-black/40 object-cover bg-gray-800 shadow-lg" />
             <div className="pt-4">
               <h1 className="font-bold text-lg leading-tight" style={{ color: textColor }}>{tenant.name}</h1>
-              <p className="text-[11px] opacity-70">🛍️ Catálogo Online & E-commerce</p>
+              <p className="text-[11px] opacity-70">{storeMode === 'aluguel' ? '🗓️ Locação Online' : storeMode === 'ambos' ? '🛍️ Venda & 🗓️ Locação' : '🛍️ Catálogo Online & E-commerce'}</p>
             </div>
           </div>
         </div>
@@ -762,11 +1234,41 @@ export default function EcommerceCliente() {
           </div>
         </div>
 
+        {/* LOCAÇÃO: CLIENTE IDENTIFICADO + DATAS */}
+        {rentalOn && (
+          <div className="mt-3 px-4 space-y-2">
+            {rentalCustomer?.table && (
+              <div className="bg-green-500/10 border border-green-500/30 text-green-300 text-[11px] p-2.5 rounded-xl font-bold text-center">
+                🏢 {rentalCustomer.company_name || rentalCustomer.name}: preços da tabela <b>{rentalCustomer.table.name}</b> (-{num(rentalCustomer.table.discount_percent)}%) já aplicados
+              </div>
+            )}
+            <RentalDateBar
+              start={rentalStart}
+              end={rentalEnd}
+              onChange={(a, b) => { setRentalStart(a); setRentalEnd(b); }}
+              days={rentalDays}
+              error={rentalDateError}
+              settings={rentalSettings}
+              colors={rentalColors}
+            />
+          </div>
+        )}
+
         {/* GRID DE PRODUTOS */}
         <div className="mt-4 px-4 grid grid-cols-2 gap-3">
           {filteredProducts.map(p => {
-            const hasPromo = p.original_price && Number(p.original_price) > Number(p.price);
-            const discPercent = hasPromo ? Math.round(((Number(p.original_price) - Number(p.price)) / Number(p.original_price)) * 100) : 0;
+            const showRental = canRent(p) && (!canBuy(p) || storeMode === 'aluguel');
+            const rentalDisplay = canRent(p) ? displayDailyPrice(p, rentalDiscount) : null;
+            const periodInfo = canRent(p) && rentalDays > 0 && !rentalDateError ? computeRentalUnitPrice(p, rentalDays, rentalDiscount) : null;
+            const hasPromo = showRental
+              ? hasRentalPromo(p)
+              : (p.original_price && Number(p.original_price) > Number(p.price));
+            const discPercent = hasPromo
+              ? (showRental
+                  ? Math.round(((num(p.rental_original_price) - num(p.rental_daily_price)) / num(p.rental_original_price)) * 100)
+                  : Math.round(((Number(p.original_price) - Number(p.price)) / Number(p.original_price)) * 100))
+              : 0;
+            const salePrice = round2(Number(p.price) * (1 - saleDiscount / 100));
 
             return (
               <div 
@@ -786,6 +1288,11 @@ export default function EcommerceCliente() {
                       ⚡ Digital
                     </span>
                   )}
+                  {canRent(p) && storeMode === 'ambos' && (
+                    <span className="bg-purple-600/90 text-white font-extrabold text-[8px] px-2 py-0.5 rounded-full shadow border border-purple-400/30 uppercase tracking-wider">
+                      🗓️ Aluga
+                    </span>
+                  )}
                 </div>
 
                 <div>
@@ -797,16 +1304,33 @@ export default function EcommerceCliente() {
                 </div>
 
                 <div className="mt-2 pt-2 border-t border-white/10 flex justify-between items-end">
+                  {showRental ? (
+                    <div>
+                      {rentalDisplay.original > rentalDisplay.price && (
+                        <span className="text-[10px] opacity-50 line-through block leading-tight">{formatBRL(rentalDisplay.original)}</span>
+                      )}
+                      <span className="font-bold text-xs block" style={{ color: hasPromo ? '#f87171' : primaryColor }}>
+                        {formatBRL(rentalDisplay.price)}<span className="text-[9px] opacity-70">{rentalDisplay.suffix}</span>
+                      </span>
+                      {periodInfo?.available && <span className="text-[9px] opacity-70 block">{rentalDays} dia(s): <b>{formatBRL(periodInfo.unit)}</b></span>}
+                      {rentalDays > 0 && !rentalDateError && <AvailabilityBadge info={availability[String(p.id)]} />}
+                    </div>
+                  ) : (
                   <div>
-                    {hasPromo && (
+                    {(hasPromo || saleDiscount > 0) && (
                       <span className="text-[10px] opacity-50 line-through block leading-tight">
-                        R$ {Number(p.original_price).toFixed(2)}
+                        R$ {Number(hasPromo ? p.original_price : p.price).toFixed(2)}
                       </span>
                     )}
                     <span className={`font-bold text-xs block ${hasPromo ? 'text-red-400 font-extrabold' : ''}`} style={{ color: hasPromo ? '#f87171' : primaryColor }}>
-                      R$ {Number(p.price).toFixed(2)}
+                      R$ {salePrice.toFixed(2)}
                     </span>
+                    {canRent(p) && rentalDisplay && rentalDisplay.price > 0 && (
+                      <span className="text-[9px] block font-bold text-purple-300">ou alugue: {formatBRL(rentalDisplay.price)}{rentalDisplay.suffix}</span>
+                    )}
+                    {canRent(p) && rentalDays > 0 && !rentalDateError && <AvailabilityBadge info={availability[String(p.id)]} />}
                   </div>
+                  )}
 
                   <button style={{ backgroundColor: primaryColor, color: btnTextColor }} className="px-2 py-1 rounded-lg text-[10px] font-bold transition shadow shrink-0">
                     Ver
@@ -862,10 +1386,23 @@ export default function EcommerceCliente() {
             style={{ backgroundColor: primaryColor, color: btnTextColor }}
             className="w-full font-bold p-3.5 rounded-2xl flex justify-between items-center shadow-2xl transition hover:opacity-95">
             <span className="text-xs bg-black/20 px-2.5 py-1 rounded-lg">🛍️ {cart.reduce((a, b) => a + b.quantity, 0)} itens</span>
-            <span className="text-xs font-bold uppercase tracking-wider">Finalizar Compra</span>
+            <span className="text-xs font-bold uppercase tracking-wider">{isRentalCart ? 'Finalizar Reserva' : 'Finalizar Compra'}</span>
             <span className="text-xs font-bold">R$ {total.toFixed(2)}</span>
           </button>
         </div>
+      )}
+
+      {showCompanyModal && (
+        <CompanyAccessModal
+          tenant={tenant}
+          colors={rentalColors}
+          onClose={() => setShowCompanyModal(false)}
+          onLogged={(c) => { setRentalCustomer(c); setShowCompanyModal(false); alert(c.table ? `✅ Bem-vindo(a)! Preços da tabela ${c.table.name} aplicados.` : '✅ Cadastro identificado!'); }}
+        />
+      )}
+
+      {showTermsModal && (
+        <TermsModal text={rentalSettings.terms_text} items={pricedCart} colors={rentalColors} onClose={() => setShowTermsModal(false)} />
       )}
 
       {/* MODAL MEUS PEDIDOS */}
@@ -969,19 +1506,70 @@ export default function EcommerceCliente() {
               </div>
             )}
 
+            {canRent(selectedProduct) && canBuy(selectedProduct) && (
+              <div className="flex bg-black/30 p-1 rounded-xl border border-white/10">
+                {[['venda', '🛍️ Comprar'], ['aluguel', '🗓️ Alugar']].map(([k, t]) => (
+                  <button key={k} type="button" onClick={() => setBuyMode(k)}
+                    style={buyMode === k ? { backgroundColor: primaryColor, color: btnTextColor } : {}}
+                    className="flex-1 py-2 rounded-lg text-xs font-bold transition">{t}</button>
+                ))}
+              </div>
+            )}
+
+            {buyMode === 'aluguel' && (
+              <div className="space-y-2">
+                <div className="flex items-baseline space-x-2">
+                  {(() => { const d = displayDailyPrice(selectedProduct, rentalDiscount); return (<>
+                    <span className="text-xl font-extrabold" style={{ color: hasRentalPromo(selectedProduct) ? '#f87171' : primaryColor }}>{formatBRL(d.price)}<span className="text-xs opacity-70">{d.suffix}</span></span>
+                    {d.original > d.price && <span className="text-xs text-gray-500 line-through">{formatBRL(d.original)}</span>}
+                  </>); })()}
+                </div>
+                {getPeriods(selectedProduct).length > 0 && (
+                  <div className="text-[11px] opacity-80 space-y-0.5">
+                    {getPeriods(selectedProduct).map((pk, idx) => <div key={idx}>🎁 {pk.label || `Até ${pk.days} dias`}: <b>{formatBRL(pk.price * (1 - rentalDiscount / 100))}</b></div>)}
+                  </div>
+                )}
+                <p className="text-xs opacity-70">{selectedProduct.description}</p>
+                <RentalDateBar
+                  start={rentalStart}
+                  end={rentalEnd}
+                  onChange={(a, b) => { setRentalStart(a); setRentalEnd(b); }}
+                  days={rentalDays}
+                  error={rentalDateError}
+                  settings={rentalSettings}
+                  colors={rentalColors}
+                />
+                {rentalDays > 0 && !rentalDateError && selectedRentalInfo && (
+                  <div style={{ backgroundColor: bgColor }} className="p-2.5 rounded-xl border border-white/10 text-xs space-y-1">
+                    <div className="flex justify-between"><span className="opacity-70">Período ({rentalDays} dia(s)):</span><b>{selectedRentalInfo.available ? formatBRL(selectedRentalInfo.unit) : '—'}/un.</b></div>
+                    {selectedRentalInfo.available && <div className="text-[10px] opacity-60">{selectedRentalInfo.label}{rentalDiscount > 0 ? ` • tabela ${rentalCustomer.table.name} -${rentalDiscount}%` : ''}</div>}
+                    <AvailabilityBadge info={selectedAvailability} needed={productQuantity} />
+                    {num(selectedProduct.rental_min_days) > 1 && <div className="text-[10px] text-yellow-300">Mínimo de {selectedProduct.rental_min_days} dias</div>}
+                  </div>
+                )}
+                {num(selectedProduct.replacement_value) > 0 && (
+                  <div className="bg-orange-500/10 border border-orange-500/20 p-2 rounded-xl text-[11px] text-orange-200">
+                    ⚠️ Valor de reposição em caso de dano ou perda: <b>{formatBRL(selectedProduct.replacement_value)}</b> por unidade.
+                  </div>
+                )}
+              </div>
+            )}
+
+            {buyMode !== 'aluguel' && (
             <div className="space-y-1">
               <div className="flex items-baseline space-x-2">
                 <span className="text-xl font-extrabold block" style={{ color: selectedProductHasPromo ? '#f87171' : primaryColor }}>
-                  R$ {Number(selectedProduct.price).toFixed(2)}
+                  R$ {modalUnitPrice.toFixed(2)}
                 </span>
-                {selectedProductHasPromo && (
+                {(selectedProductHasPromo || saleDiscount > 0) && (
                   <span className="text-xs text-gray-500 line-through">
-                    R$ {Number(selectedProduct.original_price).toFixed(2)}
+                    R$ {Number(selectedProductHasPromo ? selectedProduct.original_price : selectedProduct.price).toFixed(2)}
                   </span>
                 )}
               </div>
               <p className="text-xs opacity-70">{selectedProduct.description}</p>
             </div>
+            )}
 
             {selectedProduct.is_digital && (
               <div className="bg-blue-500/10 border border-blue-500/20 p-2.5 rounded-xl text-xs text-blue-300">
@@ -1062,7 +1650,7 @@ export default function EcommerceCliente() {
                 onClick={handleAddProductToCart}
                 style={{ backgroundColor: primaryColor, color: btnTextColor }}
                 className="flex-1 font-bold py-3 rounded-xl text-xs shadow-lg transition">
-                Adicionar • R$ {(Number(selectedProduct.price) * productQuantity).toFixed(2)}
+                {buyMode === 'aluguel' ? 'Reservar' : 'Adicionar'} • R$ {(modalUnitPrice * productQuantity).toFixed(2)}
               </button>
             </div>
           </div>
@@ -1074,11 +1662,11 @@ export default function EcommerceCliente() {
         <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 p-4">
           <div style={{ backgroundColor: cardColor, color: textColor }} className="border border-white/10 w-full max-w-sm rounded-2xl p-5 space-y-4 shadow-2xl max-h-[90vh] overflow-y-auto">
             <div className="flex justify-between items-center border-b border-white/10 pb-2">
-              <h3 className="font-bold text-sm" style={{ color: primaryColor }}>🛍️ Sacola de Compras</h3>
+              <h3 className="font-bold text-sm" style={{ color: primaryColor }}>{isRentalCart ? '🗓️ Sua Reserva' : '🛍️ Sacola de Compras'}</h3>
               <button onClick={() => setShowCartModal(false)} className="opacity-60 font-bold text-xs">✕ Fechar</button>
             </div>
 
-            {!isAllDigital && freeThreshold > 0 && (
+            {!isRentalCart && !isAllDigital && freeThreshold > 0 && (
               <div 
                 className="text-[11px] p-2.5 rounded-xl font-bold text-center border transition"
                 style={{ 
@@ -1101,7 +1689,7 @@ export default function EcommerceCliente() {
             )}
 
             <div className="space-y-2 max-h-48 overflow-y-auto">
-              {cart.map(item => (
+              {pricedCart.map(item => (
                 <div key={item.cartItemId} style={{ backgroundColor: bgColor }} className="p-2.5 rounded-xl border border-white/10 flex justify-between items-start text-xs space-x-2">
                   <div className="flex-1">
                     <div className="flex items-center space-x-1.5">
@@ -1113,6 +1701,9 @@ export default function EcommerceCliente() {
                     )}
                     {item.note && (
                       <p className="text-[10px] opacity-60 italic">Obs: "{item.note}"</p>
+                    )}
+                    {item.type === 'aluguel' && (
+                      <span className="text-[10px] opacity-60 block">{rentalDays > 0 ? `${rentalDays} dia(s) • ${item.price_label}` : 'Escolha as datas'}</span>
                     )}
                     <span style={{ color: primaryColor }} className="font-bold block mt-0.5">R$ {(Number(item.price) * item.quantity).toFixed(2)}</span>
                   </div>
@@ -1147,6 +1738,7 @@ export default function EcommerceCliente() {
               )}
             </form>
 
+            {isRentalCart ? renderRentalCheckout() : (
             <form onSubmit={handleFinishOrder} className="space-y-3 pt-2 border-t border-white/10">
               
               {/* OPÇÕES DE ENTREGA OCULTAS SE TUDO FOR DIGITAL */}
@@ -1349,6 +1941,7 @@ export default function EcommerceCliente() {
                 {isSubmitting ? 'Gerando Pagamento...' : 'Finalizar Pedido 🚀'}
               </button>
             </form>
+            )}
           </div>
         </div>
       )}
@@ -1388,7 +1981,7 @@ export default function EcommerceCliente() {
             )}
 
             <div className="space-y-2">
-              <span className="text-xs text-gray-400 block font-bold">Valor Total: <b className="text-green-400 text-sm">R$ {total.toFixed(2)}</b></span>
+              <span className="text-xs text-gray-400 block font-bold">{isRentalCart && rentalAmountNow < total ? 'Sinal da reserva' : 'Valor Total'}: <b className="text-green-400 text-sm">R$ {(isRentalCart ? rentalAmountNow : total).toFixed(2)}</b></span>
               
               <button
                 type="button"
