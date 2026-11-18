@@ -101,6 +101,14 @@ export default function EcommerceCliente() {
   const isRentalCart = cart.length > 0 && cart[0].type === 'aluguel';
   const canRent = (p) => rentalOn && !!p?.rental_enabled;
   const canBuy = (p) => storeMode === 'venda' || (storeMode === 'ambos' && p?.sale_enabled !== false);
+  // Estoque de venda: em branco = ilimitado; digital nunca esgota
+  const hasSaleStock = (p) => !!p && !p.is_digital && p.stock !== null && p.stock !== undefined && p.stock !== '';
+  const saleSoldOut = (p) => hasSaleStock(p) && Number(p.stock) <= 0;
+  const saleMaxQty = (p) => {
+    if (!hasSaleStock(p) || !tenant?.stock_control_enabled) return Infinity;
+    const inCart = cart.filter((i) => i.type !== 'aluguel' && String(i.id) === String(p.id)).reduce((a, b) => a + b.quantity, 0);
+    return Math.max(Number(p.stock) - inCart, 0);
+  };
 
   // DISPONIBILIDADE DOS ITENS NAS DATAS ESCOLHIDAS
   useEffect(() => {
@@ -139,21 +147,18 @@ export default function EcommerceCliente() {
   // POLLING DE MONITORAMENTO EM TEMPO REAL DO PIX DINÂMICO
   useEffect(() => {
     let interval = null;
-    if (showPixModal && pixPaymentId && tenant?.pix_access_token && pixStatus !== 'approved') {
+    if (showPixModal && pixPaymentId && tenant?.pix_ready && pixStatus !== 'approved') {
       interval = setInterval(async () => {
         try {
-          const res = await fetch(`https://api.mercadopago.com/v1/payments/${pixPaymentId}`, {
-            headers: {
-              'Authorization': `Bearer ${tenant.pix_access_token}`
-            }
+          // A consulta e a baixa do pedido são feitas no servidor (o token do Mercado Pago não fica no navegador)
+          const res = await fetch('/api/pix-status', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ tenant_id: tenant.id, payment_id: pixPaymentId, order_id: currentOrderId })
           });
           const data = await res.json();
           if (data && data.status === 'approved') {
             setPixStatus('approved');
-            if (currentOrderId) {
-              const isPartialRental = currentOrderPayload?.order_type === 'aluguel' && num(currentOrderPayload?.down_payment_value) < num(currentOrderPayload?.total);
-              await supabase.from('orders').update(isPartialRental ? { payment_method: 'PIX (sinal pago)' } : { is_paid: true }).eq('id', currentOrderId);
-            }
             clearInterval(interval);
           }
         } catch (e) {
@@ -181,14 +186,14 @@ export default function EcommerceCliente() {
     setLoading(true);
     const cleanSlug = String(slug).trim();
     
-    const { data: tData, error: tErr } = await supabase
-      .from('tenants')
-      .select('*')
-      .ilike('slug', cleanSlug)
-      .maybeSingle();
-
-    if (tErr) {
-      console.error("Erro ao buscar dados do tenant:", tErr.message);
+    // Dados da loja vêm do servidor SEM senhas e SEM tokens (Mercado Pago, Melhor Envio)
+    let tData = null;
+    try {
+      const resp = await fetch(`/api/public-store?slug=${encodeURIComponent(cleanSlug)}`);
+      const json = await resp.json();
+      tData = json.tenant || null;
+    } catch (tErr) {
+      console.error("Erro ao buscar dados do tenant:", tErr);
     }
 
     if (tData) {
@@ -348,6 +353,12 @@ export default function EcommerceCliente() {
       return;
     }
 
+    if (saleSoldOut(selectedProduct)) return alert('😕 Produto esgotado no momento.');
+    const maxQty = saleMaxQty(selectedProduct);
+    if (productQuantity > maxQty) {
+      return alert(maxQty > 0 ? `Só temos ${maxQty} unidade(s) disponível(is) deste produto${maxQty < Number(selectedProduct.stock) ? ' (o restante já está no seu carrinho)' : ''}.` : 'Você já colocou no carrinho todas as unidades disponíveis deste produto.');
+    }
+
     if (isRentalCart) {
       if (!confirm('Seu carrinho tem itens de LOCAÇÃO. Para comprar, finalize a reserva antes ou esvazie o carrinho.\n\nEsvaziar o carrinho e continuar com a compra?')) return;
     }
@@ -419,6 +430,25 @@ export default function EcommerceCliente() {
 
       const isFree = freeThreshold > 0 && subtotal >= freeThreshold;
       const options = [];
+
+      if (tenant?.shipping_api_ready) {
+        try {
+          const shipRes = await fetch('/api/calculate-shipping', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ tenant_id: tenant.id, destinationCep: cleanCep, items: cart.map(i => ({ id: i.id, quantity: i.quantity, price: i.price, is_digital: i.is_digital })) })
+          });
+          const shipData = await shipRes.json();
+          if (Array.isArray(shipData.options) && shipData.options.length > 0) {
+            const realOptions = shipData.options.map(o => ({ id: o.id, name: `🚚 ${o.name}`, fee: isFree ? 0 : Number(o.fee), time: o.time }));
+            setCalculatedOptions(realOptions);
+            setSelectedShippingOption(realOptions[0]);
+            return;
+          }
+        } catch (shipErr) {
+          console.error('Melhor Envio indisponível, usando estimativa:', shipErr);
+        }
+      }
 
       const basePacFee = Math.max(16.50, 16.50 + (totalWeight - 0.5) * 4.5);
       const baseSedexFee = Math.max(28.90, 28.90 + (totalWeight - 0.5) * 8.0);
@@ -742,15 +772,14 @@ export default function EcommerceCliente() {
     const isPartial = rentalAmountNow < total;
     const payDescription = `Reserva #${insertedOrder.id}${isPartial ? ' (sinal)' : ''} - ${tenant.name}`;
 
-    if (paymentMethod === 'PIX' && tenant.pix_enabled && tenant.pix_access_token) {
+    if (paymentMethod === 'PIX' && tenant.pix_ready) {
       try {
         const mpRes = await fetch('/api/create-pix', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            amount: Number(rentalAmountNow.toFixed(2)),
+            tenant_id: tenant.id,
             description: payDescription,
-            accessToken: tenant.pix_access_token,
             orderId: insertedOrder.id,
             payer: { email: `${onlyDigits(customerPhone) || 'cliente'}@sac.com`, name: customerName }
           })
@@ -770,16 +799,14 @@ export default function EcommerceCliente() {
       } catch (err) {
         alert(`⚠️ Sua reserva #${insertedOrder.id} foi registrada, mas houve erro ao gerar o PIX. Fale com a loja.`);
       }
-    } else if (paymentMethod.includes('Cartão') && tenant.pix_access_token) {
+    } else if (paymentMethod.includes('Cartão') && tenant.card_ready) {
       try {
         const prefRes = await fetch('/api/create-preference', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            items: [{ name: payDescription, quantity: 1, price: Number(rentalAmountNow.toFixed(2)) }],
-            accessToken: tenant.pix_access_token,
+            tenant_id: tenant.id,
             orderId: insertedOrder.id,
-            tenantName: tenant.name,
             customerName,
             customerPhone
           })
@@ -878,7 +905,12 @@ export default function EcommerceCliente() {
       .maybeSingle();
 
     if (insertErr) {
-      alert("⚠️ Erro ao salvar pedido no banco de dados:\n" + insertErr.message);
+      if (String(insertErr.message || '').includes('SEM_ESTOQUE')) {
+        alert('😕 Um item do seu carrinho acabou de esgotar:\n' + String(insertErr.message).split('SEM_ESTOQUE:')[1].trim() + '\n\nAjuste a quantidade no carrinho e tente de novo.');
+        fetchTenantData();
+      } else {
+        alert("⚠️ Erro ao salvar pedido no banco de dados:\n" + insertErr.message);
+      }
       setIsSubmitting(false);
       return;
     }
@@ -891,7 +923,7 @@ export default function EcommerceCliente() {
       window.fbq('track', 'Purchase', { value: total, currency: 'BRL' });
     }
 
-    const isPixDynamic = paymentMethod === 'PIX' && tenant.pix_enabled && tenant.pix_access_token;
+    const isPixDynamic = paymentMethod === 'PIX' && tenant.pix_ready;
 
     if (isPixDynamic) {
       try {
@@ -899,9 +931,8 @@ export default function EcommerceCliente() {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            amount: Number(total.toFixed(2)),
+            tenant_id: tenant.id,
             description: `Pedido #${insertedOrder.id} - ${tenant.name}`,
-            accessToken: tenant.pix_access_token,
             orderId: insertedOrder.id,
             payer: {
               email: `${customerPhone.replace(/\D/g, '') || 'cliente'}@sac.com`,
@@ -934,7 +965,7 @@ export default function EcommerceCliente() {
       }
     }
 
-    const isCardPayment = paymentMethod.includes('Cartão') && tenant.pix_access_token;
+    const isCardPayment = paymentMethod.includes('Cartão') && tenant.card_ready;
 
     if (isCardPayment) {
       try {
@@ -942,10 +973,8 @@ export default function EcommerceCliente() {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            items: pricedCart.map(i => ({ name: i.name, quantity: i.quantity, price: Number(i.price) })),
-            accessToken: tenant.pix_access_token,
+            tenant_id: tenant.id,
             orderId: insertedOrder.id,
-            tenantName: tenant.name,
             customerName: customerName,
             customerPhone: customerPhone
           })
@@ -1107,7 +1136,8 @@ export default function EcommerceCliente() {
   };
 
   return (
-    <div className="min-h-screen font-sans pb-24 max-w-md mx-auto transition-colors duration-300 relative flex flex-col justify-between" style={{ backgroundColor: bgColor, color: textColor }}>
+    <div className="min-h-screen" style={{ backgroundColor: bgColor }}>
+    <div className="min-h-screen font-sans pb-24 max-w-md md:max-w-3xl lg:max-w-6xl mx-auto transition-colors duration-300 relative flex flex-col justify-between" style={{ backgroundColor: bgColor, color: textColor }}>
       
       <div>
         {/* BARRA DE AVISOS E COMUNICADOS */}
@@ -1118,7 +1148,7 @@ export default function EcommerceCliente() {
         )}
 
         {/* CAPA DA LOJA */}
-        <div className="relative h-36 bg-gray-900 border-b border-white/10">
+        <div className="relative h-36 md:h-56 lg:h-64 bg-gray-900 border-b border-white/10 md:rounded-b-3xl md:overflow-hidden">
           <img src={tenant.banner_url || 'https://images.unsplash.com/photo-1441986300917-64674bd600d8?w=800&auto=format&fit=crop&q=80'} alt="Capa da Loja" className="w-full h-full object-cover opacity-50" />
           
           <div className="absolute top-3 right-3 flex items-center space-x-2 z-10">
@@ -1170,7 +1200,7 @@ export default function EcommerceCliente() {
                     key={idx} 
                     src={bannerUrl} 
                     alt={`Destaque ${idx + 1}`} 
-                    className="w-full h-36 object-cover shrink-0" 
+                    className="w-full h-36 md:h-56 lg:h-72 object-cover shrink-0" 
                   />
                 ))}
               </div>
@@ -1255,7 +1285,7 @@ export default function EcommerceCliente() {
         )}
 
         {/* GRID DE PRODUTOS */}
-        <div className="mt-4 px-4 grid grid-cols-2 gap-3">
+        <div className="mt-4 px-4 grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3 md:gap-4">
           {filteredProducts.map(p => {
             const showRental = canRent(p) && (!canBuy(p) || storeMode === 'aluguel');
             const rentalDisplay = canRent(p) ? displayDailyPrice(p, rentalDiscount) : null;
@@ -1297,9 +1327,14 @@ export default function EcommerceCliente() {
 
                 <div>
                   <div className="relative overflow-hidden rounded-xl mb-2">
-                    <img src={p.image || 'https://images.unsplash.com/photo-1523275335684-37898b6baf30?w=300&auto=format&fit=crop&q=80'} alt={p.name} className="w-full h-28 object-cover border border-white/10 bg-gray-800" />
+                    <img src={p.image || 'https://images.unsplash.com/photo-1523275335684-37898b6baf30?w=300&auto=format&fit=crop&q=80'} alt={p.name} className={`w-full h-28 md:h-40 lg:h-44 object-cover border border-white/10 bg-gray-800 transition ${!showRental && saleSoldOut(p) ? 'grayscale opacity-50' : 'md:group-hover:scale-105'}`} />
+                    {!showRental && saleSoldOut(p) && (
+                      <span className="absolute inset-0 flex items-center justify-center">
+                        <span className="bg-black/80 text-white text-[10px] font-extrabold px-3 py-1 rounded-full uppercase tracking-wider border border-white/20">Esgotado</span>
+                      </span>
+                    )}
                   </div>
-                  <h3 className="font-bold text-xs line-clamp-2 leading-snug h-8" style={{ color: textColor }}>{p.name}</h3>
+                  <h3 className="font-bold text-xs md:text-sm line-clamp-2 leading-snug h-8 md:h-10" style={{ color: textColor }}>{p.name}</h3>
                   <p className="text-[10px] opacity-60 line-clamp-2 h-7 mt-1">{p.description}</p>
                 </div>
 
@@ -1332,7 +1367,7 @@ export default function EcommerceCliente() {
                   </div>
                   )}
 
-                  <button style={{ backgroundColor: primaryColor, color: btnTextColor }} className="px-2 py-1 rounded-lg text-[10px] font-bold transition shadow shrink-0">
+                  <button style={{ backgroundColor: primaryColor, color: btnTextColor }} className="px-2 py-1 md:px-3 md:py-1.5 rounded-lg text-[10px] md:text-xs font-bold transition shadow shrink-0">
                     Ver
                   </button>
                 </div>
@@ -1380,7 +1415,7 @@ export default function EcommerceCliente() {
 
       {/* BARRA DO CARRINHO FLUTUANTE */}
       {cart.length > 0 && (
-        <div className="fixed bottom-4 left-4 right-4 max-w-md mx-auto z-40">
+        <div className="fixed bottom-4 left-4 right-4 max-w-md md:max-w-lg mx-auto z-40">
           <button
             onClick={() => setShowCartModal(true)}
             style={{ backgroundColor: primaryColor, color: btnTextColor }}
@@ -1408,7 +1443,7 @@ export default function EcommerceCliente() {
       {/* MODAL MEUS PEDIDOS */}
       {showMyOrdersModal && (
         <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 p-4">
-          <div style={{ backgroundColor: cardColor, color: textColor }} className="border border-white/10 w-full max-w-sm rounded-2xl p-5 space-y-4 shadow-2xl max-h-[90vh] overflow-y-auto">
+          <div style={{ backgroundColor: cardColor, color: textColor }} className="border border-white/10 w-full max-w-sm md:max-w-lg rounded-2xl p-5 md:p-6 space-y-4 shadow-2xl max-h-[90vh] overflow-y-auto">
             <div className="flex justify-between items-center border-b border-white/10 pb-2">
               <h3 className="font-bold text-sm" style={{ color: primaryColor }}>📦 Meus Pedidos Recentes</h3>
               <button onClick={() => setShowMyOrdersModal(false)} className="opacity-60 font-bold text-xs">✕ Fechar</button>
@@ -1464,7 +1499,7 @@ export default function EcommerceCliente() {
       {/* MODAL DE DETALHES DO PRODUTO */}
       {selectedProduct && (
         <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 p-4">
-          <div style={{ backgroundColor: cardColor, color: textColor }} className="border border-white/10 w-full max-w-sm rounded-2xl p-5 space-y-4 shadow-2xl max-h-[90vh] overflow-y-auto">
+          <div style={{ backgroundColor: cardColor, color: textColor }} className="border border-white/10 w-full max-w-sm md:max-w-lg rounded-2xl p-5 md:p-6 space-y-4 shadow-2xl max-h-[90vh] overflow-y-auto">
             <div className="flex justify-between items-start border-b border-white/10 pb-2 gap-2">
               <div className="flex-1">
                 <div className="flex items-center space-x-2">
@@ -1483,7 +1518,7 @@ export default function EcommerceCliente() {
             </div>
 
             <div className="relative">
-              <img src={activeImage} alt={selectedProduct.name} className="w-full h-44 rounded-xl object-cover border border-white/10 bg-gray-900" />
+              <img src={activeImage} alt={selectedProduct.name} className="w-full h-44 md:h-72 rounded-xl object-cover border border-white/10 bg-gray-900" />
               {selectedProductHasPromo && (
                 <span className="absolute top-2 right-2 bg-gradient-to-r from-red-600 to-orange-500 text-white font-extrabold text-xs px-2.5 py-1 rounded-full shadow-lg border border-white/20">
                   -{Math.round(((Number(selectedProduct.original_price) - Number(selectedProduct.price)) / Number(selectedProduct.original_price)) * 100)}% OFF
@@ -1639,19 +1674,29 @@ export default function EcommerceCliente() {
               />
             </div>
 
+            {buyMode !== 'aluguel' && tenant?.stock_control_enabled && hasSaleStock(selectedProduct) && Number(selectedProduct.stock) > 0 && Number(selectedProduct.stock) <= 5 && (
+              <p className="text-[11px] font-bold text-orange-400">🔥 Últimas {Number(selectedProduct.stock)} unidade(s)!</p>
+            )}
+
             <div className="flex items-center space-x-3 pt-2">
               <div className="flex items-center space-x-2 bg-black/30 p-1 rounded-xl border border-white/10">
                 <button onClick={() => setProductQuantity(Math.max(1, productQuantity - 1))} className="w-8 h-8 rounded-lg bg-gray-800 text-white font-bold text-sm">-</button>
                 <span className="font-bold px-2">{productQuantity}</span>
-                <button onClick={() => setProductQuantity(productQuantity + 1)} style={{ backgroundColor: primaryColor, color: btnTextColor }} className="w-8 h-8 rounded-lg font-bold text-sm">+</button>
+                <button onClick={() => setProductQuantity(buyMode !== 'aluguel' && productQuantity >= saleMaxQty(selectedProduct) ? productQuantity : productQuantity + 1)} style={{ backgroundColor: primaryColor, color: btnTextColor }} className="w-8 h-8 rounded-lg font-bold text-sm">+</button>
               </div>
 
+              {buyMode !== 'aluguel' && saleSoldOut(selectedProduct) ? (
+                <button type="button" disabled className="flex-1 font-bold py-3 rounded-xl text-xs bg-gray-700 text-gray-300 cursor-not-allowed">
+                  😕 Esgotado
+                </button>
+              ) : (
               <button
                 onClick={handleAddProductToCart}
                 style={{ backgroundColor: primaryColor, color: btnTextColor }}
                 className="flex-1 font-bold py-3 rounded-xl text-xs shadow-lg transition">
                 {buyMode === 'aluguel' ? 'Reservar' : 'Adicionar'} • R$ {(modalUnitPrice * productQuantity).toFixed(2)}
               </button>
+              )}
             </div>
           </div>
         </div>
@@ -1660,7 +1705,7 @@ export default function EcommerceCliente() {
       {/* MODAL DO CARRINHO & CHECKOUT */}
       {showCartModal && (
         <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 p-4">
-          <div style={{ backgroundColor: cardColor, color: textColor }} className="border border-white/10 w-full max-w-sm rounded-2xl p-5 space-y-4 shadow-2xl max-h-[90vh] overflow-y-auto">
+          <div style={{ backgroundColor: cardColor, color: textColor }} className="border border-white/10 w-full max-w-sm md:max-w-lg rounded-2xl p-5 md:p-6 space-y-4 shadow-2xl max-h-[90vh] overflow-y-auto">
             <div className="flex justify-between items-center border-b border-white/10 pb-2">
               <h3 className="font-bold text-sm" style={{ color: primaryColor }}>{isRentalCart ? '🗓️ Sua Reserva' : '🛍️ Sacola de Compras'}</h3>
               <button onClick={() => setShowCartModal(false)} className="opacity-60 font-bold text-xs">✕ Fechar</button>
@@ -2026,6 +2071,7 @@ export default function EcommerceCliente() {
           </div>
         </div>
       )}
+    </div>
     </div>
   );
 }

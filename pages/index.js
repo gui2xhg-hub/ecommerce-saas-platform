@@ -1,6 +1,15 @@
 import React, { useState, useEffect } from 'react';
 import { useRouter } from 'next/router';
 import { supabase } from '../lib/supabase';
+import { shopLogin, clearShopToken } from '../lib/shopAuth';
+
+// Remove senhas/tokens que versões antigas guardavam no aparelho
+const stripSecrets = (t) => {
+  if (!t) return t;
+  const c = { ...t };
+  Object.keys(c).forEach((k) => { if (/(password|senha|token|secret|api_key)$/i.test(k)) delete c[k]; });
+  return c;
+};
 
 export default function HomePortalEcommerce() {
   const router = useRouter();
@@ -32,23 +41,22 @@ export default function HomePortalEcommerce() {
     const savedTenant = localStorage.getItem('sinerge_authenticated_ecommerce_tenant');
     if (savedTenant) {
       try {
-        const parsed = JSON.parse(savedTenant);
+        const parsed = stripSecrets(JSON.parse(savedTenant));
         setTenant(parsed);
+        localStorage.setItem('sinerge_authenticated_ecommerce_tenant', JSON.stringify(parsed));
 
-        if (parsed && parsed.id) {
-          // Re-busca a versão mais recente do Master no banco
-          supabase
-            .from('tenants')
-            .select('*')
-            .eq('id', parsed.id)
-            .single()
-            .then(({ data }) => {
+        if (parsed && parsed.slug) {
+          // Re-busca a versão mais recente da loja (sem senhas/tokens)
+          fetch(`/api/public-store?slug=${encodeURIComponent(parsed.slug)}`)
+            .then((r) => r.json())
+            .then(({ tenant: data }) => {
               if (data) {
                 setTenant(data);
                 localStorage.setItem('sinerge_authenticated_ecommerce_tenant', JSON.stringify(data));
                 fetchTenantStats(data.id);
               }
-            });
+            })
+            .catch(() => {});
         }
       } catch (e) {
         localStorage.removeItem('sinerge_authenticated_ecommerce_tenant');
@@ -84,17 +92,14 @@ export default function HomePortalEcommerce() {
     setLoading(true);
     const cleanSlug = slugInput.toLowerCase().trim();
 
-    const { data, error } = await supabase
-      .from('tenants')
-      .select('*')
-      .eq('slug', cleanSlug)
-      .eq('admin_password', passwordInput)
-      .maybeSingle();
+    // Senha conferida no servidor
+    const result = await shopLogin(cleanSlug, passwordInput);
+    const data = result.ok ? result.tenant : null;
 
     setLoading(false);
 
-    if (error || !data) {
-      alert("Identificador da loja ou Senha de Administrador incorretos!");
+    if (!data) {
+      alert(result.error && result.error.includes('tentativas') ? result.error : "Identificador da loja ou Senha de Administrador incorretos!");
     } else {
       setTenant(data);
       localStorage.setItem('sinerge_authenticated_ecommerce_tenant', JSON.stringify(data));
@@ -103,6 +108,7 @@ export default function HomePortalEcommerce() {
   };
 
   const handleLogout = () => {
+    if (tenant?.slug) clearShopToken(tenant.slug);
     localStorage.removeItem('sinerge_authenticated_ecommerce_tenant');
     setTenant(null);
     setSlugInput('');

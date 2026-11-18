@@ -11,10 +11,15 @@ const resolveCategoryId = (chosen, categories) => {
   if (id === null || id === undefined) return null;
   return isNaN(Number(id)) ? id : Number(id);
 };
-import { isMasterPassword } from '../../lib/checkMaster';
+import { shopLogin, shopSessionValid, clearShopToken } from '../../lib/shopAuth';
 import { getStoreMode, formatBRL, num, getPeriods } from '../../lib/rental';
 import RentalAdminTab from '../../components/rental/RentalAdminTab';
 import ProductRentalFields, { rentalFieldsToDb } from '../../components/rental/ProductRentalFields';
+import ProductCostFields, { EMPTY_COST_FIELDS, costFieldsFromProduct, costFieldsToDb } from '../../components/erp/ProductCostFields';
+import StockTab from '../../components/erp/StockTab';
+import SuppliersTab from '../../components/erp/SuppliersTab';
+import FinanceTab from '../../components/erp/FinanceTab';
+import { SetupNotice } from '../../components/erp/ui';
 
 // CAMPOS PADRÃO DE LOCAÇÃO DE UM PRODUTO NOVO (só usados quando o módulo está liberado)
 const EMPTY_RENTAL_FIELDS = {
@@ -53,6 +58,8 @@ export default function AdminTenant() {
   const [coupons, setCoupons] = useState([]);
   const [allOrders, setAllOrders] = useState([]);
   const [reportFilter, setReportFilter] = useState('all');
+  const [suppliers, setSuppliers] = useState([]);
+  const [purchaseDraft, setPurchaseDraft] = useState(null);
 
   // CONFIGURAÇÕES AUTOMÁTICAS E MODOS DE FRETE
   const [shippingMode, setShippingMode] = useState('local'); // 'local', 'national', 'hybrid'
@@ -79,7 +86,8 @@ export default function AdminTenant() {
     stock: '',
     is_digital: false,
     download_url: '',
-    ...EMPTY_RENTAL_FIELDS
+    ...EMPTY_RENTAL_FIELDS,
+    ...EMPTY_COST_FIELDS
   });
   const [editingProduct, setEditingProduct] = useState(null);
   const [editingCategory, setEditingCategory] = useState(null);
@@ -107,7 +115,12 @@ export default function AdminTenant() {
   }, [slug]);
 
   const fetchTenant = async () => {
-    const { data: tData } = await supabase.from('tenants').select('*').eq('slug', slug).single();
+    // Antes do login: só dados públicos da loja (sem senhas/tokens)
+    let tData = null;
+    try {
+      const resp = await fetch(`/api/public-store?slug=${encodeURIComponent(slug)}`);
+      tData = (await resp.json()).tenant || null;
+    } catch (e) {}
     if (tData) {
       setTenant(tData);
       setShippingMode(tData.shipping_mode || 'local');
@@ -116,17 +129,24 @@ export default function AdminTenant() {
       setDefaultShippingFee(tData.default_shipping_fee ?? 0.00);
       setFreeShippingThreshold(tData.free_shipping_threshold ?? 0.00);
       setEnablePickup(tData.enable_pickup ?? true);
+      // Login lembrado neste aparelho
+      if (await shopSessionValid(tData.slug)) {
+        setIsAuthenticated(true);
+        await fetchData(tData.id);
+      }
     }
     setLoading(false);
   };
 
   const handleLogin = async (e) => {
     e.preventDefault();
-    if (tenant && (password === tenant.admin_password || await isMasterPassword(password))) {
+    // Senha conferida no servidor (a senha da loja não vai mais para o navegador)
+    const result = tenant ? await shopLogin(tenant.slug, password) : { ok: false };
+    if (result.ok) {
       setIsAuthenticated(true);
       fetchData(tenant.id);
     } else {
-      alert('Senha incorreta!');
+      alert(result.error && result.error.includes('tentativas') ? result.error : 'Senha incorreta!');
     }
   };
 
@@ -162,6 +182,14 @@ export default function AdminTenant() {
     if (nData) setNeighborhoods(nData);
     if (cpData) setCoupons(cpData);
     if (oData) setAllOrders(oData);
+
+    // Gestão (estoque/fornecedores/financeiro): só se o banco já foi atualizado
+    if (tData && 'erp_version' in tData) {
+      try {
+        const { data: sData } = await supabase.from('suppliers').select('*').eq('tenant_id', tenantId).order('name', { ascending: true });
+        if (sData) setSuppliers(sData);
+      } catch (err) {}
+    }
   };
 
   const handleSaveTenantSettings = async (e) => {
@@ -177,7 +205,7 @@ export default function AdminTenant() {
       instagram_url: tenant.instagram_url || '',
       primary_color: tenant.primary_color || '#3B82F6',
       secondary_color: tenant.secondary_color || '#090D16',
-      admin_password: tenant.admin_password || '',
+      ...(tenant.admin_password !== undefined ? { admin_password: tenant.admin_password || '' } : {}),
       niche: tenant.niche || 'general',
       shipping_mode: shippingMode,
       origin_cep: originCep,
@@ -192,7 +220,7 @@ export default function AdminTenant() {
       custom_message: tenant.custom_message || '',
       pix_enabled: tenant.pix_enabled || false,
       pix_provider: tenant.pix_provider || 'mercadopago',
-      pix_access_token: tenant.pix_access_token || ''
+      ...(tenant.pix_access_token !== undefined ? { pix_access_token: tenant.pix_access_token || '' } : {})
     };
 
     const { error } = await supabase.from('tenants').update(updatePayload).eq('id', tenant.id);
@@ -341,7 +369,8 @@ export default function AdminTenant() {
       length_cm: newProd.is_digital ? 0 : parsePrice(newProd.length_cm, 20),
       stock: stockVal,
       active: autoActive,
-      ...(rentalModule ? rentalFieldsToDb(newProd) : {})
+      ...(rentalModule ? rentalFieldsToDb(newProd) : {}),
+      ...(tenant && 'erp_version' in tenant ? costFieldsToDb(newProd) : {})
     }]);
 
     if (error) {
@@ -364,7 +393,8 @@ export default function AdminTenant() {
         stock: '',
         is_digital: false,
         download_url: '',
-        ...EMPTY_RENTAL_FIELDS
+        ...EMPTY_RENTAL_FIELDS,
+    ...EMPTY_COST_FIELDS
       });
       fetchData();
     }
@@ -388,7 +418,7 @@ export default function AdminTenant() {
     const stockVal = editingProduct.stock !== '' && editingProduct.stock !== null ? parseInt(editingProduct.stock) : null;
     const autoActive = stockVal !== null ? stockVal > 0 : editingProduct.active;
 
-    const { error } = await supabase.from('products').update({
+    const updatePayloadProd = {
       name: editingProduct.name.trim(),
       price: formattedPrice,
       original_price: formattedOrigPrice,
@@ -405,8 +435,17 @@ export default function AdminTenant() {
       length_cm: editingProduct.is_digital ? 0 : parsePrice(editingProduct.length_cm, 20),
       stock: stockVal,
       active: autoActive,
-      ...(rentalModule ? rentalFieldsToDb(editingProduct) : {})
-    }).eq('id', editingProduct.id);
+      ...(rentalModule ? rentalFieldsToDb(editingProduct) : {}),
+      ...(tenant && 'erp_version' in tenant ? costFieldsToDb(editingProduct) : {})
+    };
+    // Com a baixa automática ligada, só grava o estoque se ele foi alterado neste formulário
+    // (evita desfazer uma venda que aconteceu enquanto o produto estava aberto para edição)
+    const originalProd = products.find((p) => String(p.id) === String(editingProduct.id));
+    if (tenant?.stock_control_enabled && originalProd && String(originalProd.stock ?? '') === String(stockVal ?? '')) {
+      delete updatePayloadProd.stock;
+      delete updatePayloadProd.active;
+    }
+    const { error } = await supabase.from('products').update(updatePayloadProd).eq('id', editingProduct.id);
 
     if (error) {
       alert("Erro ao atualizar produto: " + error.message);
@@ -569,9 +608,10 @@ export default function AdminTenant() {
   }
 
   const primaryColor = tenant.primary_color || '#3B82F6';
+  const erpReady = 'erp_version' in tenant;
 
   return (
-    <div className="min-h-screen bg-gray-950 text-white p-4 max-w-4xl mx-auto font-sans pb-16">
+    <div className="min-h-screen bg-gray-950 text-white p-4 max-w-4xl lg:max-w-6xl mx-auto font-sans pb-16">
       <header className="flex justify-between items-center py-4 border-b border-gray-800 mb-6 print:hidden">
         <div>
           <h1 className="font-bold text-lg text-blue-400 flex items-center space-x-2">
@@ -579,7 +619,7 @@ export default function AdminTenant() {
           </h1>
           <p className="text-xs text-gray-400">Painel de Gestão de Catálogo & Vendas</p>
         </div>
-        <button onClick={() => setIsAuthenticated(false)} className="text-xs bg-gray-900 border border-gray-800 hover:bg-gray-800 px-3 py-1.5 rounded-xl text-red-400 font-bold transition">
+        <button onClick={() => { clearShopToken(tenant.slug); setIsAuthenticated(false); }} className="text-xs bg-gray-900 border border-gray-800 hover:bg-gray-800 px-3 py-1.5 rounded-xl text-red-400 font-bold transition">
           🚪 Sair
         </button>
       </header>
@@ -591,6 +631,27 @@ export default function AdminTenant() {
           style={activeTab === 'products' ? { backgroundColor: primaryColor, color: '#FFFFFF' } : {}}
           className={`flex-1 py-2.5 px-3 rounded-xl whitespace-nowrap transition ${activeTab === 'products' ? 'shadow-md' : 'text-gray-400 hover:text-white'}`}>
           📦 Produtos
+        </button>
+
+        <button 
+          onClick={() => setActiveTab('stock')} 
+          style={activeTab === 'stock' ? { backgroundColor: primaryColor, color: '#FFFFFF' } : {}}
+          className={`flex-1 py-2.5 px-3 rounded-xl whitespace-nowrap transition ${activeTab === 'stock' ? 'shadow-md' : 'text-emerald-300 hover:text-white'}`}>
+          🗃️ Estoque
+        </button>
+
+        <button 
+          onClick={() => setActiveTab('suppliers')} 
+          style={activeTab === 'suppliers' ? { backgroundColor: primaryColor, color: '#FFFFFF' } : {}}
+          className={`flex-1 py-2.5 px-3 rounded-xl whitespace-nowrap transition ${activeTab === 'suppliers' ? 'shadow-md' : 'text-emerald-300 hover:text-white'}`}>
+          🏭 Fornecedores
+        </button>
+
+        <button 
+          onClick={() => setActiveTab('finance')} 
+          style={activeTab === 'finance' ? { backgroundColor: primaryColor, color: '#FFFFFF' } : {}}
+          className={`flex-1 py-2.5 px-3 rounded-xl whitespace-nowrap transition ${activeTab === 'finance' ? 'shadow-md' : 'text-emerald-300 hover:text-white'}`}>
+          💰 Financeiro
         </button>
 
         {tenant.rental_module_enabled && (
@@ -656,6 +717,22 @@ export default function AdminTenant() {
         />
       )}
 
+      {/* GESTÃO: ESTOQUE, FORNECEDORES E FINANCEIRO */}
+      {['stock', 'suppliers', 'finance'].includes(activeTab) && !erpReady && <SetupNotice />}
+      {activeTab === 'stock' && erpReady && (
+        <StockTab tenant={tenant} products={products} suppliers={suppliers} primaryColor={primaryColor}
+          onChanged={() => fetchData()} onTenantChanged={() => fetchData()}
+          onCreatePurchase={(items) => { setPurchaseDraft(items); setActiveTab('suppliers'); }} />
+      )}
+      {activeTab === 'suppliers' && erpReady && (
+        <SuppliersTab tenant={tenant} products={products} suppliers={suppliers} primaryColor={primaryColor}
+          onChanged={() => fetchData()} draftItems={purchaseDraft} onDraftConsumed={() => setPurchaseDraft(null)} />
+      )}
+      {activeTab === 'finance' && erpReady && (
+        <FinanceTab tenant={tenant} orders={allOrders} products={products} suppliers={suppliers} primaryColor={primaryColor}
+          onOrdersChanged={() => fetchData()} />
+      )}
+
       {/* ABA DE PRODUTOS */}
       {activeTab === 'products' && (
         <div className="space-y-6">
@@ -694,6 +771,11 @@ export default function AdminTenant() {
 
               {tenant.rental_module_enabled && (
                 <ProductRentalFields value={newProd} onChange={setNewProd} storeMode={getStoreMode(tenant)} />
+              )}
+
+              {erpReady && !newProd.is_digital && (
+                <ProductCostFields value={costFieldsFromProduct(newProd)} onChange={(v) => setNewProd({ ...newProd, ...v })}
+                  suppliers={suppliers} price={newProd.price} onPrice={(pr) => setNewProd((prev) => ({ ...prev, price: pr }))} />
               )}
 
               {/* CHAVE SELETORA E CAMPOS DIGITAIS VS FÍSICOS */}
@@ -1439,6 +1521,11 @@ export default function AdminTenant() {
 
             {tenant.rental_module_enabled && (
               <ProductRentalFields value={editingProduct} onChange={setEditingProduct} storeMode={getStoreMode(tenant)} />
+            )}
+
+            {erpReady && !editingProduct.is_digital && (
+              <ProductCostFields value={costFieldsFromProduct(editingProduct)} onChange={(v) => setEditingProduct({ ...editingProduct, ...v })}
+                suppliers={suppliers} price={editingProduct.price} onPrice={(pr) => setEditingProduct((prev) => ({ ...prev, price: pr }))} />
             )}
 
             {/* SELETOR DIGITAL NO MODAL DE EDIÇÃO */}

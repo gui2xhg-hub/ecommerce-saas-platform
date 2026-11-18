@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useRouter } from 'next/router';
 import { supabase } from '../../lib/supabase';
+import { shopLogin, shopSessionValid, clearShopToken } from '../../lib/shopAuth';
 
 export default function FilaProducao() {
   const router = useRouter();
@@ -10,9 +11,23 @@ export default function FilaProducao() {
   const [orders, setOrders] = useState([]);
   const [loading, setLoading] = useState(true);
   const [errorMessage, setErrorMessage] = useState('');
+  // LOGIN DA EQUIPE (antes qualquer pessoa com o link via todos os pedidos e telefones)
+  const [authed, setAuthed] = useState(null);
+  const [loginPass, setLoginPass] = useState('');
 
   useEffect(() => {
-    if (router.isReady && slug) {
+    if (router.isReady && slug) shopSessionValid(slug).then((ok) => { setAuthed(ok); if (!ok) setLoading(false); });
+  }, [router.isReady, slug]);
+
+  const handleLogin = async (e) => {
+    e.preventDefault();
+    const r = await shopLogin(slug, loginPass);
+    if (r.ok) { setLoginPass(''); setLoading(true); setAuthed(true); }
+    else alert(r.error || 'Senha incorreta!');
+  };
+
+  useEffect(() => {
+    if (router.isReady && slug && authed) {
       fetchData();
 
       // INSCRIÇÃO NO SUPABASE REALTIME
@@ -34,20 +49,18 @@ export default function FilaProducao() {
         supabase.removeChannel(channel);
       };
     }
-  }, [router.isReady, slug]);
+  }, [router.isReady, slug, authed]);
 
   const fetchData = async () => {
     try {
       const cleanSlug = String(slug).trim();
 
-      const { data: tData, error: tError } = await supabase
-        .from('tenants')
-        .select('*')
-        .ilike('slug', cleanSlug)
-        .maybeSingle();
-
-      if (tError) {
-        setErrorMessage("Erro ao buscar dados da loja: " + tError.message);
+      let tData = null;
+      try {
+        const resp = await fetch(`/api/public-store?slug=${encodeURIComponent(cleanSlug)}`);
+        tData = (await resp.json()).tenant || null;
+      } catch (tError) {
+        setErrorMessage("Erro ao buscar dados da loja.");
         setLoading(false);
         return;
       }
@@ -244,7 +257,24 @@ export default function FilaProducao() {
     printWindow.document.close();
   };
 
-  if (loading) return <div className="min-h-screen bg-gray-950 text-white flex items-center justify-center font-sans"><p className="text-xs text-gray-400">Carregando Fila de Produção...</p></div>;
+  if (authed === false) {
+    return (
+      <div className="min-h-screen bg-gray-950 text-white flex items-center justify-center p-4 font-sans">
+        <form onSubmit={handleLogin} className="bg-gray-900 p-6 rounded-2xl border border-gray-800 w-full max-w-sm space-y-4 shadow-2xl">
+          <div className="text-center space-y-1">
+            <div className="text-3xl">📦</div>
+            <h2 className="text-lg font-bold text-orange-500">Fila de Produção</h2>
+            <p className="text-xs text-gray-400">Área da equipe. Entre com a senha de administrador da loja.</p>
+          </div>
+          <input type="password" placeholder="Senha" value={loginPass} onChange={(e) => setLoginPass(e.target.value)} className="w-full bg-gray-800 border border-gray-700 p-3 rounded-xl text-sm text-white focus:outline-none" />
+          <button type="submit" className="w-full bg-orange-500 hover:bg-orange-600 text-white font-bold py-3 rounded-xl text-xs">Entrar</button>
+          <p className="text-[10px] text-gray-500 text-center">Você só precisa entrar uma vez neste aparelho.</p>
+        </form>
+      </div>
+    );
+  }
+
+  if (loading || authed === null) return <div className="min-h-screen bg-gray-950 text-white flex items-center justify-center font-sans"><p className="text-xs text-gray-400">Carregando Fila de Produção...</p></div>;
 
   const novos = orders.filter(o => o.status === 'recebido' || !o.status);
   const emProducao = orders.filter(o => o.status === 'em_producao' || o.status === 'preparando');

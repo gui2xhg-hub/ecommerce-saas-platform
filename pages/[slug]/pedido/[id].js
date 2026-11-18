@@ -36,11 +36,12 @@ export default function AcompanharPedido() {
   const fetchOrderData = async () => {
     setLoading(true);
 
-    const { data: tData } = await supabase
-      .from('tenants')
-      .select('*')
-      .ilike('slug', String(slug).trim())
-      .maybeSingle();
+    // Dados da loja sem senhas/tokens
+    let tData = null;
+    try {
+      const resp = await fetch(`/api/public-store?slug=${encodeURIComponent(String(slug).trim())}`);
+      tData = (await resp.json()).tenant || null;
+    } catch (e) {}
 
     if (tData) {
       setTenant(tData);

@@ -7,6 +7,7 @@
 // Se a API não estiver configurada, devolve "fallback_url" (link wa.me) para o painel/loja abrir.
 import { serverSupabase } from '../../lib/serverSupabase';
 import { isAdminPassword } from '../../lib/adminAuth';
+import { verifyToken } from '../../lib/authToken';
 import { sendWhatsApp, normalizePhone, isConfigComplete } from '../../lib/whatsapp';
 import { getRentalSettings, renderTemplate, buildOrderMessageVars } from '../../lib/rental';
 
@@ -40,7 +41,7 @@ export default async function handler(req, res) {
   try {
     const tenant = await loadTenant(tenant_id);
     if (!tenant) return res.status(404).json({ ok: false, error: 'Loja não encontrada' });
-    const isAdmin = isAdminPassword(tenant, password);
+    const isAdmin = isAdminPassword(tenant, password) || !!verifyToken(req.body.token, tenant.slug);
 
     // ---------------- CONFIGURAÇÃO ----------------
     if (action === 'get_config') {

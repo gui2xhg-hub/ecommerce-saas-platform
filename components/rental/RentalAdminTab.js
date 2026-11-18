@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { supabase } from '../../lib/supabase';
+import { getShopToken } from '../../lib/shopAuth';
 import {
   getRentalSettings, DEFAULT_RENTAL_SETTINGS, formatBRL, formatDateBR, todayISO, addDaysISO,
   rentalStage, RENTAL_STATUS_LABELS, formatDocument, num, onlyDigits, isValidCNPJ, isValidCPF
@@ -68,7 +69,7 @@ export default function RentalAdminTab({ tenant, adminPassword, products, primar
       const r = await fetch('/api/rental-whatsapp', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'send', tenant_id: tenant.id, order_id: order.id, event, password: adminPassword })
+        body: JSON.stringify({ action: 'send', tenant_id: tenant.id, order_id: order.id, event, password: adminPassword, token: getShopToken(tenant.slug) })
       });
       const data = await r.json();
       if (data.sent) return alert('✅ Mensagem enviada pelo WhatsApp automático.');
@@ -575,7 +576,7 @@ function WhatsAppView({ tenant, adminPassword }) {
   const [busy, setBusy] = useState(false);
 
   const call = async (body) => {
-    const r = await fetch('/api/rental-whatsapp', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ tenant_id: tenant.id, password: adminPassword, ...body }) });
+    const r = await fetch('/api/rental-whatsapp', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ tenant_id: tenant.id, password: adminPassword, token: getShopToken(tenant.slug), ...body }) });
     return r.json();
   };
 
